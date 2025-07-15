@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>心拍数グラフ</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>各Watchの心拍数グラフ</h1>
+  <div id="charts"></div>
+
+  <!-- <style>
+  canvas {
+    width: 400px !important;  /* 横幅（通常の半分くらい） */
+    height: 200px !important; /* 縦幅（通常の半分くらい） */
+    margin: 20px auto;
+    display: block;
+  }
+</style> -->
+
+  <script>
+  async function drawGraphs() {
+    const res = await fetch('http://192.168.100.26:8080/graph-data');
+    const heartRateHistory = await res.json();
+
+    for (const [watch, data] of Object.entries(heartRateHistory)) {
+      const canvas = document.createElement('canvas');
+      canvas.id = `chart-${watch}`;
+      document.getElementById('charts').appendChild(canvas);
+
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: data.map((_, i) => i + 1),
+          datasets: [{
+            label: `心拍数 (${watch})`,
+            data: data,
+            borderWidth: 2,
+            fill: false,
+            tension: 0.1,
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              suggestedMin: 40,
+              suggestedMax: 120
+            }
+          }
+        }
+      });
+    }
+  }
+
+  window.onload = drawGraphs;
+</script>
+   <div style="text-align: center; margin-top: 20px;">
+    <button onclick="location.href='index.html'" style="font-size: 1.2em; padding: 10px 20px;">メインに戻る</button>
+  </div>
+</body>
+</html>
