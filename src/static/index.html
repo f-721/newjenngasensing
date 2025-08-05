@@ -50,6 +50,13 @@
     .stop-button:hover {
       background-color: #e53935;
     }
+    #turn-display-large {
+      text-align: center;
+      font-size: 3em;
+      font-weight: bold;
+      color: #333;
+      margin-top: 20px;
+    }
   </style>
 <script>
   let intervalId = null;
@@ -121,8 +128,7 @@
       console.error('取得中にエラーが発生しました:', error);
     }
   }
-
-  async function refreshGameStatus() {
+async function refreshGameStatus() {
     try {
       const res = await fetch('/status');
       const data = await res.json();
@@ -139,6 +145,7 @@
       const data = await res.json();
       console.log('%c[JS] POST /start ->', 'color: green;', data);
       await refreshGameStatus();
+      await refreshClientList();
       alert('ゲームを開始しました');
     } catch (error) {
       console.error(error);
@@ -161,21 +168,16 @@
 
   async function resetServer() {
     if (!confirm("本当にリセットしますか？全データを消去します。")) return;
-
     try {
       const res = await fetch('/reset', { method: 'POST' });
       const data = await res.json();
-      console.log('[JS] POST /reset ->', data);
-
       localStorage.removeItem("maxHeartRates");
-
       document.getElementById('rate').innerHTML = '<p>読み込み中...</p>';
       document.getElementById('max-rate').innerHTML = '<p>最大心拍数を記録中...</p>';
       document.getElementById('status').innerText = '状態: 停止';
-
       await refreshGameStatus();
       await refreshCurrentTurn();
-
+      await refreshClientList();
       alert('リセットが完了しました');
     } catch (error) {
       console.error(error);
@@ -187,10 +189,77 @@
     try {
       const res = await fetch('/turn');
       const data = await res.json();
-      document.getElementById('current-turn').innerText = '今のターン: ' + (data.current_turn || 'なし');
+      let display;
+      if (!data.current_turn) {
+        display = '全員受付中';
+      } else {
+        display = `watch ${data.current_turn.slice(-1)} のターンです`;
+      }
+      document.getElementById('current-turn').innerText = '今のターン: ' + display;
+      document.getElementById('turn-display-large').innerText = display;
     } catch (error) {
       console.error(error);
       document.getElementById('current-turn').innerText = '今のターン: 取得失敗';
+      document.getElementById('turn-display-large').innerText = '';
+    }
+  }
+
+  async function refreshClientList() {
+    const selector = document.getElementById("turnSelector");
+    selector.innerHTML = "";
+    try {
+      const res = await fetch("/clients");
+      const data = await res.json();
+      document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
+      for (const ip in data.ids) {
+        const id = data.ids[ip];
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = id;
+        selector.appendChild(option);
+      }
+    } catch (e) {
+      console.error(e);
+      document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
+    }
+  }
+
+  function setTurn() {
+    const selectedId = document.getElementById("turnSelector").value;
+    fetch("/set_turn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_turn: selectedId })
+    })
+      .then(res => res.json())
+      .then(data => {
+        alert(data.message);
+        refreshCurrentTurn();
+      })
+      .catch(err => console.error(err));
+  }
+
+  async function nextTurn() {
+    try {
+      const clientRes = await fetch("/clients");
+      const turnRes = await fetch("/turn");
+      const clients = await clientRes.json();
+      const current = (await turnRes.json()).current_turn;
+      const ids = Object.values(clients.ids).sort(); // watch順
+      const idx = ids.indexOf(current);
+      const nextId = ids[(idx + 1) % ids.length];
+
+      const res = await fetch("/set_turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_turn: nextId })
+      });
+      const result = await res.json();
+      alert(result.message);
+      refreshCurrentTurn();
+    } catch (e) {
+      console.error(e);
+      alert("ターン変更に失敗しました");
     }
   }
 
@@ -198,52 +267,34 @@
     document.getElementById('status').innerText = '状態: 停止';
     refreshGameStatus();
     refreshCurrentTurn();
-
-    // ローカル保存の最大心拍数を最初に描画
-    const maxContainer = document.getElementById('max-rate');
-    maxContainer.innerHTML = '';
-    for (const [device_id, bpm] of Object.entries(maxHeartRates)) {
-      const div = document.createElement('div');
-      div.innerText = `最大心拍数: ${bpm} bpm (${device_id})`;
-      div.style.fontSize = '1.5em';
-      div.style.fontWeight = 'bold';
-      maxContainer.appendChild(div);
-    }
+    refreshClientList();
   };
 </script>
 </head>
 <body>
   <h1>心拍数モニター</h1>
-
-  <div id="current-turn" style="text-align:center; font-weight:bold; margin-bottom:10px;">
-  今のターン: 未取得
-</div>
-
-  <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">
-    状態: 未設定
-  </div>
-
-  <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;">
-    ゲーム状態: 未取得
-  </div>
+  <div id="turn-display-large"></div>
+  <div id="current-turn" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
+  <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
 
   <div class="flex-container">
-    <div id="rate">
-      <p>読み込み中...</p>
-    </div>
-
-    <div id="max-rate">
-      <p>最大心拍数を記録中...</p>
-    </div>
+    <div id="rate"><p>読み込み中...</p></div>
+    <div id="max-rate"><p>最大心拍数を記録中...</p></div>
   </div>
 
   <div class="button-container">
+    <h3>ターン操作</h3>
+    <select id="turnSelector"></select>
+    <button onclick="setTurn()">この人のターンにする</button>
+    <button onclick="nextTurn()" style="font-size: 1.5em; margin-top: 10px;">ターンエンド</button>
+    <hr>
     <button onclick="startFetching()">取得開始</button>
     <button class="stop-button" onclick="stopFetching()">取得停止</button>
     <br>
     <button onclick="startGame()">ゲーム開始</button>
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
-    <button onclick="refreshGameStatus()">状態更新</button>
     <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>
   </div>
 </body>

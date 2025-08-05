@@ -1,52 +1,32 @@
 {
   "watch1": [
     {
-      "timestamp": 1752556166382,
-      "heartbeat": 76.0
+      "timestamp": 1753863932656,
+      "heartbeat": 71.0
     },
     {
-      "timestamp": 1752556167387,
-      "heartbeat": 76.0
+      "timestamp": 1753863933754,
+      "heartbeat": 71.0
     },
     {
-      "timestamp": 1752556167400,
-      "heartbeat": 76.0
+      "timestamp": 1753863933772,
+      "heartbeat": 71.0
     },
     {
-      "timestamp": 1752556168389,
-      "heartbeat": 76.0
+      "timestamp": 1753863934898,
+      "heartbeat": 70.0
     },
     {
-      "timestamp": 1752556168402,
-      "heartbeat": 76.0
+      "timestamp": 1753863936046,
+      "heartbeat": 70.0
     },
     {
-      "timestamp": 1752556169393,
-      "heartbeat": 77.0
+      "timestamp": 1753863936027,
+      "heartbeat": 70.0
     },
     {
-      "timestamp": 1752556169406,
-      "heartbeat": 77.0
-    },
-    {
-      "timestamp": 1752556170397,
-      "heartbeat": 77.0
-    },
-    {
-      "timestamp": 1752556170412,
-      "heartbeat": 77.0
-    },
-    {
-      "timestamp": 1752556171403,
-      "heartbeat": 78.0
-    },
-    {
-      "timestamp": 1752556171419,
-      "heartbeat": 78.0
-    },
-    {
-      "timestamp": 1752556172409,
-      "heartbeat": 78.0
+      "timestamp": 1753863937078,
+      "heartbeat": 70.0
     }
   ]
 }
