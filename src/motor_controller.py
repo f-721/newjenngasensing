@@ -42,12 +42,12 @@ def rotary(direction, stepSpeed):
                 else:
                     GPIO.output(motorPins[i], (0x99 << j) & (0x80 >> i))
             sleep(stepSpeed)
-
+# ここで速度の調整を行います
 def calculate_rpm(bpm):
     if bpm <= 70:
-        return 5
+        return 10
     elif bpm <= 80:
-        return 15
+        return 20
     else:
         return 30
 

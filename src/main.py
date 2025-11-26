@@ -61,11 +61,16 @@ def start_game():
 
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
 
+def save_current_turn(turn_id):
+    save_json_file(TURN_FILE, {"current_turn": turn_id})
+
 @app.route('/stop', methods=['POST'])
 def stop_game():
     save_json_file(GAME_STATUS_FILE, {"running": False})
-    print("[API] ゲーム停止")
+    save_current_turn(None)  # ← エラー解消後に使えるようになる
+    print("[API] ゲーム停止 -> ターン解除")
     return jsonify({"status": "ok", "message": "ゲームを停止しました"})
+    
 
 @app.route('/status', methods=['GET'])
 def get_status():

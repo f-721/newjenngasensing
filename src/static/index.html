@@ -269,6 +269,38 @@ async function refreshGameStatus() {
     refreshCurrentTurn();
     refreshClientList();
   };
+
+  document.addEventListener('keydown', async (event) => {
+    if (event.key === 'Enter') {
+      try {
+        const turnRes = await fetch("/turn");
+        const turnData = await turnRes.json();
+        const currentTurnId = turnData.current_turn;
+
+        if (!currentTurnId) {
+          alert("現在のターンIDが取得できません");
+          return;
+        }
+
+        const res = await fetch("/next_turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ end_turn: currentTurnId })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          alert(`ターン終了 → 次: ${data.next_turn}`);
+          await refreshCurrentTurn();
+        } else {
+          alert("ターン終了失敗: " + (data.error || data.message));
+        }
+      } catch (e) {
+        console.error(e);
+        alert("エラーが発生しました");
+      }
+    }
+  });
 </script>
 </head>
 <body>
