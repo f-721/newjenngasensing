@@ -84,19 +84,6 @@
       localStorage.setItem("fetchingStatus", "running");
     }
 
-    // ゲーム状態を定期的にチェック
-  setInterval(() => {
-    fetch('/status')  // ← サーバ側でこのAPIを用意してる前提
-      .then(res => res.json())
-      .then(data => {
-        const csvBtn = document.getElementById("csvBtn");
-        if (data.running === false) {
-          csvBtn.disabled = false;  // ゲーム終了後は有効
-        } else {
-          csvBtn.disabled = true;   // ゲーム中は押せない
-        }
-      });
-  }, 1000); // 毎秒チェック
 
     function stopFetching() {
       if (intervalId !== null) {
@@ -186,7 +173,7 @@ async function startGame() {
         console.log('[JS] POST /stop ->', data);
         await refreshGameStatus();
         alert('ゲームを終了しました');
-        document.getElementById('exportBtn').style.display = 'inline-block';
+        document.getElementById('csvBtn').style.display = 'inline-block';
       } catch (error) {
         console.error(error);
         alert('終了リクエスト失敗');
