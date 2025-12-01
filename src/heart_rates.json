@@ -1,84 +1,36 @@
 {
   "watch1": [
     {
-      "timestamp": 1764575895441,
-      "heartbeat": 66.0
+      "timestamp": 1764621656416,
+      "heartbeat": 75.0
     },
     {
-      "timestamp": 1764575895422,
-      "heartbeat": 66.0
-    },
-    {
-      "timestamp": 1764575895465,
-      "heartbeat": 66.0
-    },
-    {
-      "timestamp": 1764575895518,
-      "heartbeat": 67.0
-    },
-    {
-      "timestamp": 1764575895535,
-      "heartbeat": 67.0
-    },
-    {
-      "timestamp": 1764575895526,
-      "heartbeat": 67.0
-    },
-    {
-      "timestamp": 1764575896499,
-      "heartbeat": 68.0
-    },
-    {
-      "timestamp": 1764575896499,
-      "heartbeat": 68.0
-    },
-    {
-      "timestamp": 1764575898511,
-      "heartbeat": 69.0
-    },
-    {
-      "timestamp": 1764575899515,
-      "heartbeat": 70.0
-    },
-    {
-      "timestamp": 1764575901570,
-      "heartbeat": 71.0
-    },
-    {
-      "timestamp": 1764575901525,
-      "heartbeat": 71.0
-    },
-    {
-      "timestamp": 1764575901539,
-      "heartbeat": 71.0
-    },
-    {
-      "timestamp": 1764575901572,
-      "heartbeat": 71.0
-    },
-    {
-      "timestamp": 1764575908464,
-      "heartbeat": 70.0
-    },
-    {
-      "timestamp": 1764575909651,
-      "heartbeat": 71.0
-    },
-    {
-      "timestamp": 1764575913484,
-      "heartbeat": 72.0
-    },
-    {
-      "timestamp": 1764575925514,
+      "timestamp": 1764621656458,
       "heartbeat": 73.0
     },
     {
-      "timestamp": 1764575929530,
-      "heartbeat": 72.0
+      "timestamp": 1764621656486,
+      "heartbeat": 73.0
     },
     {
-      "timestamp": 1764575939812,
+      "timestamp": 1764621656522,
+      "heartbeat": 73.0
+    },
+    {
+      "timestamp": 1764621656584,
+      "heartbeat": 73.0
+    },
+    {
+      "timestamp": 1764621658035,
       "heartbeat": 71.0
+    },
+    {
+      "timestamp": 1764621660273,
+      "heartbeat": 70.0
+    },
+    {
+      "timestamp": 1764621660270,
+      "heartbeat": 70.0
     }
   ]
 }

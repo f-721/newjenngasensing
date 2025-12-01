@@ -57,215 +57,258 @@
       color: #333;
       margin-top: 20px;
     }
+      .graph-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+  }
+  .watch-graph {
+    width: 45%;
+    min-width: 300px;
+  }
+
   </style>
-<script>
-  let intervalId = null;
-  const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let intervalId = null;
+    const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
 
-  function startFetching() {
-  if (intervalId !== null) return;
-  intervalId = setInterval(() => {
-    fetchHeartRate();
-    refreshCurrentTurn();
-  }, 1000);
-  document.getElementById('status').innerText = '状態: 取得中';
-  localStorage.setItem("fetchingStatus", "running");  // ← 追加
-}
-
-function stopFetching() {
-  if (intervalId !== null) {
-    clearInterval(intervalId);
-    intervalId = null;
-  }
-  document.getElementById('status').innerText = '状態: 停止';
-  localStorage.setItem("fetchingStatus", "stopped");  // ← 追加
-}
-
-  async function fetchHeartRate() {
-    try {
-      const res = await fetch('/heart');
-      const text = await res.text();
-      let data = {};
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        console.error('JSON parse error:', e);
-        document.getElementById('rate').innerText = '取得エラー (形式不正)';
-        return;
-      }
-
-      const rateContainer = document.getElementById('rate');
-      const maxContainer = document.getElementById('max-rate');
-      rateContainer.innerHTML = '';
-      maxContainer.innerHTML = '';
-
-      if (!data || Object.keys(data).length === 0) {
-        rateContainer.innerText = 'データがありません';
-        maxContainer.innerText = '最大心拍数を記録できません';
-      } else {
-        for (const [device_id, record] of Object.entries(data)) {
-          const bpm = record.heartbeat;
-          const div = document.createElement('div');
-          div.innerText = `心拍数: ${bpm} bpm (${device_id})`;
-          div.style.fontSize = '1.5em';
-          div.style.fontWeight = 'bold';
-          rateContainer.appendChild(div);
-
-          if (!maxHeartRates[device_id] || bpm > maxHeartRates[device_id]) {
-            maxHeartRates[device_id] = bpm;
-            localStorage.setItem("maxHeartRates", JSON.stringify(maxHeartRates));
-          }
-        }
-
-        for (const [device_id, maxBpm] of Object.entries(maxHeartRates)) {
-          const div = document.createElement('div');
-          div.innerText = `最大心拍数: ${maxBpm} bpm (${device_id})`;
-          div.style.fontSize = '1.5em';
-          div.style.fontWeight = 'bold';
-          maxContainer.appendChild(div);
-        }
-      }
-    } catch (error) {
-      document.getElementById('rate').innerText = '取得エラー';
-      console.error('取得中にエラーが発生しました:', error);
+    function startFetching() {
+      if (intervalId !== null) return;
+      intervalId = setInterval(() => {
+        fetchHeartRate();
+        refreshCurrentTurn();
+      }, 1000);
+      document.getElementById('status').innerText = '状態: 取得中';
+      localStorage.setItem("fetchingStatus", "running");
     }
-  }
-async function refreshGameStatus() {
-    try {
-      const res = await fetch('/status');
-      const data = await res.json();
-      document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
-    } catch (error) {
-      console.error(error);
-      document.getElementById('game-status').innerText = 'ゲーム状態: 取得失敗';
-    }
-  }
 
-  async function startGame() {
-    try {
-      const res = await fetch('/start', { method: 'POST' });
-      const data = await res.json();
-      console.log('%c[JS] POST /start ->', 'color: green;', data);
-      await refreshGameStatus();
-      await refreshClientList();
-      alert('ゲームを開始しました');
-    } catch (error) {
-      console.error(error);
-      alert('開始リクエスト失敗');
-    }
-  }
-
-  async function stopGame() {
-    try {
-      const res = await fetch('/stop', { method: 'POST' });
-      const data = await res.json();
-      console.log('[JS] POST /stop ->','color:red;', data);
-      await refreshGameStatus();
-      alert('ゲームを終了しました');
-    } catch (error) {
-      console.error(error);
-      alert('終了リクエスト失敗');
-    }
-  }
-
-  async function resetServer() {
-    if (!confirm("本当にリセットしますか？全データを消去します。")) return;
-    try {
-      const res = await fetch('/reset', { method: 'POST' });
-      const data = await res.json();
-      localStorage.removeItem("maxHeartRates");
-      document.getElementById('rate').innerHTML = '<p>読み込み中...</p>';
-      document.getElementById('max-rate').innerHTML = '<p>最大心拍数を記録中...</p>';
-      document.getElementById('status').innerText = '状態: 停止';
-      await refreshGameStatus();
-      await refreshCurrentTurn();
-      await refreshClientList();
-      alert('リセットが完了しました');
-    } catch (error) {
-      console.error(error);
-      alert('リセットリクエスト失敗');
-    }
-  }
-
-  async function refreshCurrentTurn() {
-    try {
-      const res = await fetch('/turn');
-      const data = await res.json();
-      let display;
-      if (!data.current_turn) {
-        display = '全員受付中';
-      } else {
-        display = `watch ${data.current_turn.slice(-1)} のターンです`;
-      }
-      document.getElementById('current-turn').innerText = '今のターン: ' + display;
-      document.getElementById('turn-display-large').innerText = display;
-    } catch (error) {
-      console.error(error);
-      document.getElementById('current-turn').innerText = '今のターン: 取得失敗';
-      document.getElementById('turn-display-large').innerText = '';
-    }
-  }
-
-  async function refreshClientList() {
-    const selector = document.getElementById("turnSelector");
-    selector.innerHTML = "";
-    try {
-      const res = await fetch("/clients");
-      const data = await res.json();
-      document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
-      for (const ip in data.ids) {
-        const id = data.ids[ip];
-        const option = document.createElement("option");
-        option.value = id;
-        option.textContent = id;
-        selector.appendChild(option);
-      }
-    } catch (e) {
-      console.error(e);
-      document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
-    }
-  }
-
-  function setTurn() {
-    const selectedId = document.getElementById("turnSelector").value;
-    fetch("/set_turn", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ current_turn: selectedId })
-    })
+    // ゲーム状態を定期的にチェック
+  setInterval(() => {
+    fetch('/status')  // ← サーバ側でこのAPIを用意してる前提
       .then(res => res.json())
       .then(data => {
-        alert(data.message);
-        refreshCurrentTurn();
-      })
-      .catch(err => console.error(err));
-  }
+        const csvBtn = document.getElementById("csvBtn");
+        if (data.running === false) {
+          csvBtn.disabled = false;  // ゲーム終了後は有効
+        } else {
+          csvBtn.disabled = true;   // ゲーム中は押せない
+        }
+      });
+  }, 1000); // 毎秒チェック
 
-  async function nextTurn() {
-    try {
-      const clientRes = await fetch("/clients");
-      const turnRes = await fetch("/turn");
-      const clients = await clientRes.json();
-      const current = (await turnRes.json()).current_turn;
-      const ids = Object.values(clients.ids).sort(); // watch順
-      const idx = ids.indexOf(current);
-      const nextId = ids[(idx + 1) % ids.length];
+    function stopFetching() {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      document.getElementById('status').innerText = '状態: 停止';
+      localStorage.setItem("fetchingStatus", "stopped");
+    }
 
-      const res = await fetch("/set_turn", {
+    async function fetchHeartRate() {
+      try {
+        const res = await fetch('/heart');
+        const text = await res.text();
+        let data = {};
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.error('JSON parse error:', e);
+          document.getElementById('rate').innerText = '取得エラー (形式不正)';
+          return;
+        }
+
+        const rateContainer = document.getElementById('rate');
+        const maxContainer = document.getElementById('max-rate');
+        rateContainer.innerHTML = '';
+        maxContainer.innerHTML = '';
+
+        if (!data || Object.keys(data).length === 0) {
+          rateContainer.innerText = 'データがありません';
+          maxContainer.innerText = '最大心拍数を記録できません';
+        } else {
+          for (const [device_id, record] of Object.entries(data)) {
+            const bpm = record.heartbeat;
+            const div = document.createElement('div');
+            div.innerText = `心拍数: ${bpm} bpm (${device_id})`;
+            div.style.fontSize = '1.5em';
+            div.style.fontWeight = 'bold';
+            rateContainer.appendChild(div);
+
+            if (!maxHeartRates[device_id] || bpm > maxHeartRates[device_id]) {
+              maxHeartRates[device_id] = bpm;
+              localStorage.setItem("maxHeartRates", JSON.stringify(maxHeartRates));
+            }
+          }
+
+          for (const [device_id, maxBpm] of Object.entries(maxHeartRates)) {
+            const div = document.createElement('div');
+            div.innerText = `最大心拍数: ${maxBpm} bpm (${device_id})`;
+            div.style.fontSize = '1.5em';
+            div.style.fontWeight = 'bold';
+            maxContainer.appendChild(div);
+          }
+        }
+      } catch (error) {
+        document.getElementById('rate').innerText = '取得エラー';
+        console.error('取得中にエラーが発生しました:', error);
+      }
+    }
+
+    async function refreshGameStatus() {
+      try {
+        const res = await fetch('/status');
+        const data = await res.json();
+        document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
+      } catch (error) {
+        console.error(error);
+        document.getElementById('game-status').innerText = 'ゲーム状態: 取得失敗';
+      }
+    }
+
+async function startGame() {
+  await fetch("/start", { method: "POST" })
+    .then(res => res.json())
+    .then(data => {
+      isGameRunning = true;
+      document.getElementById('game-status').innerText = 'ゲーム状態：開始';
+      refreshGameStatus(); // 状態表示を更新
+      setupGraphs();       // watchごとのグラフ生成
+    });
+}
+
+    async function stopGame() {
+      try {
+        const res = await fetch('/stop', { method: 'POST' });
+        const data = await res.json();
+        console.log('[JS] POST /stop ->', data);
+        await refreshGameStatus();
+        alert('ゲームを終了しました');
+        document.getElementById('exportBtn').style.display = 'inline-block';
+      } catch (error) {
+        console.error(error);
+        alert('終了リクエスト失敗');
+      }
+    }
+
+    async function resetServer() {
+      if (!confirm("本当にリセットしますか？全データを消去します。")) return;
+      try {
+        const res = await fetch('/reset', { method: 'POST' });
+        const data = await res.json();
+        localStorage.removeItem("maxHeartRates");
+        document.getElementById('rate').innerHTML = '<p>読み込み中...</p>';
+        document.getElementById('max-rate').innerHTML = '<p>最大心拍数を記録中...</p>';
+        document.getElementById('status').innerText = '状態: 停止';
+        await refreshGameStatus();
+        await refreshCurrentTurn();
+        await refreshClientList();
+        alert('リセットが完了しました');
+      } catch (error) {
+        console.error(error);
+        alert('リセットリクエスト失敗');
+      }
+    }
+
+    async function refreshCurrentTurn() {
+      try {
+        const res = await fetch('/turn');
+        const data = await res.json();
+        let display = data.current_turn ? `watch ${data.current_turn.slice(-1)} のターンです` : '全員受付中';
+        document.getElementById('current-turn').innerText = '今のターン: ' + display;
+        document.getElementById('turn-display-large').innerText = display;
+      } catch (error) {
+        console.error(error);
+        document.getElementById('current-turn').innerText = '今のターン: 取得失敗';
+        document.getElementById('turn-display-large').innerText = '';
+      }
+    }
+
+    async function refreshClientList() {
+      const selector = document.getElementById("turnSelector");
+      selector.innerHTML = "";
+      try {
+        const res = await fetch("/clients");
+        const data = await res.json();
+        document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
+        for (const ip in data.ids) {
+          const id = data.ids[ip];
+          const option = document.createElement("option");
+          option.value = id;
+          option.textContent = id;
+          selector.appendChild(option);
+        }
+      } catch (e) {
+        console.error(e);
+        document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
+      }
+    }
+
+    function setTurn() {
+      const selectedId = document.getElementById("turnSelector").value;
+      fetch("/set_turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_turn: nextId })
-      });
-      const result = await res.json();
-      alert(result.message);
-      refreshCurrentTurn();
-    } catch (e) {
-      console.error(e);
-      alert("ターン変更に失敗しました");
+        body: JSON.stringify({ current_turn: selectedId })
+      })
+        .then(res => res.json())
+        .then(data => {
+          alert(data.message);
+          refreshCurrentTurn();
+        })
+        .catch(err => console.error(err));
     }
-  }
 
-  window.onload = () => {
+    async function nextTurn() {
+      try {
+        const clientRes = await fetch("/clients");
+        const turnRes = await fetch("/turn");
+        const clients = await clientRes.json();
+        const current = (await turnRes.json()).current_turn;
+        const ids = Object.values(clients.ids).sort();
+        const idx = ids.indexOf(current);
+        const nextId = ids[(idx + 1) % ids.length];
+        const res = await fetch("/set_turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ current_turn: nextId })
+        });
+        const result = await res.json();
+        alert(result.message);
+        refreshCurrentTurn();
+      } catch (e) {
+        console.error(e);
+        alert("ターン変更に失敗しました");
+      }
+    }
+
+    async function exportCSV() {
+      if (!confirm("CSVファイルを保存しますか？")) return;
+      try {
+        const res = await fetch('/export_csv');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "heart_rate_data.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error(error);
+        alert("CSV保存に失敗しました");
+      }
+    }
+
+
+    function getRandomColor() {
+      return `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`;
+    }
+
+ window.onload = () => {
   const prevStatus = localStorage.getItem("fetchingStatus");
   if (prevStatus === "running") {
     startFetching();
@@ -276,40 +319,149 @@ async function refreshGameStatus() {
   refreshGameStatus();
   refreshCurrentTurn();
   refreshClientList();
+
+
+  setupGraphs();
 };
+  let fetchHeartDataIntervalId = null;
 
-  document.addEventListener('keydown', async (event) => {
-    if (event.key === 'Enter') {
-      try {
-        const turnRes = await fetch("/turn");
-        const turnData = await turnRes.json();
-        const currentTurnId = turnData.current_turn;
+  function startHeartDataLoop() {
+    if (fetchHeartDataIntervalId !== null) return;  // すでに起動中ならスキップ
+    fetchHeartDataIntervalId = setInterval(fetchHeartData, 1000);
+  }
 
-        if (!currentTurnId) {
-          alert("現在のターンIDが取得できません");
-          return;
+    document.addEventListener('keydown', async (event) => {
+      if (event.key === 'Enter') {
+        try {
+          const turnRes = await fetch("/turn");
+          const turnData = await turnRes.json();
+          const currentTurnId = turnData.current_turn;
+          if (!currentTurnId) return alert("現在のターンIDが取得できません");
+
+          const res = await fetch("/next_turn", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ end_turn: currentTurnId })
+          });
+
+          const data = await res.json();
+          if (res.ok) {
+            alert(`ターン終了 → 次: ${data.next_turn}`);
+            await refreshCurrentTurn();
+          } else {
+            alert("ターン終了失敗: " + (data.error || data.message));
+          }
+        } catch (e) {
+          console.error(e);
+          alert("エラーが発生しました");
         }
+      }
+    });
 
-        const res = await fetch("/next_turn", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ end_turn: currentTurnId })
-        });
+        // 仮のwatch IDリスト（実際はサーバーから取得する）
+    let watchIds = [];
+    let isGameRunning = false;
 
-        const data = await res.json();
-        if (res.ok) {
-          alert(`ターン終了 → 次: ${data.next_turn}`);
-          await refreshCurrentTurn();
-        } else {
-          alert("ターン終了失敗: " + (data.error || data.message));
+    const charts = {};        // watchIDごとのChartインスタンス
+    const dataBuffers = {};   // watchIDごとの心拍数履歴（30件）
+
+    // グラフ描画用 canvas 生成
+function createGraph(watchId) {
+  const container = document.getElementById("graph-area");
+  const div = document.createElement("div");
+  div.className = "watch-graph";
+  div.innerHTML = `
+    <h3>${watchId}</h3>
+    <canvas id="chart-${watchId}" height="200"></canvas>
+  `;
+  container.appendChild(div);
+
+  const ctx = document.getElementById(`chart-${watchId}`).getContext('2d');
+
+  dataBuffers[watchId] = [];
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: Array(30).fill(""),
+      datasets: [{
+        label: '心拍数',
+        data: [],
+        borderColor: 'red',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: '時間（秒前）'
+          },
+          ticks: {
+            callback: function(value, index) {
+              return index + 1; // 1〜30秒
+            }
+          }
+        },
+        y: {
+          min: 60,
+          max: 120,
+          title: {
+            display: true,
+            text: 'BPM'
+          }
         }
-      } catch (e) {
-        console.error(e);
-        alert("エラーが発生しました");
       }
     }
   });
-</script>
+
+  charts[watchId] = chart;
+}
+    // データ取得関数
+ function fetchHeartData() {
+  if (!isGameRunning) return;
+
+  fetch('/get_heart_data')
+    .then(res => res.json())
+    .then(data => {
+      for (const watchId in data) {
+        const bpm = data[watchId];
+        updateGraph(watchId, bpm);
+      }
+    })
+    .catch(err => {
+      console.error("心拍数取得エラー:", err);
+    });
+
+  setTimeout(fetchHeartData, 1000); // 毎秒再実行
+}
+
+
+async function setupGraphs() {
+  try {
+    const res = await fetch('/clients');
+    const data = await res.json();
+    watchIds = Object.values(data.ids);
+
+    const container = document.getElementById("graph-area");
+    container.innerHTML = ""; // 初期化
+
+    for (const watchId of watchIds) {
+      createGraph(watchId);
+    }
+    fetchHeartData();
+    setInterval(fetchHeartData, 1000); // 毎秒取得
+  } catch (err) {
+    console.error("グラフ初期化失敗:", err);
+  }
+}
+
+  </script>
 </head>
 <body>
   <h1>心拍数モニター</h1>
@@ -336,6 +488,9 @@ async function refreshGameStatus() {
     <button onclick="startGame()">ゲーム開始</button>
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
     <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>
+    <button onclick="exportCSV()" id="csvBtn" style="display: none; background-color: #9C27B0;">CSV保存</button>
+     <h2>心拍数グラフ（30秒表示、リアルタイム更新）</h2>
+  <div id="graph-area" class="graph-container"></div>
   </div>
 </body>
 </html>

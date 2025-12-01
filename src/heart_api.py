@@ -1,18 +1,19 @@
 from flask import Blueprint, request, jsonify
-from flask import request
 import json
 import os
 import threading
-
+import time
 
 file_lock = threading.Lock()
 
 heart_api = Blueprint('heart_api', __name__)
 
 DATA_FILE = 'heart_rates.json'
+HISTORY_FILE = 'heart_history.json'
+GAME_STATUS_FILE = 'game_status.json'
 TURN_FILE = 'turn.json'
 
-# ヘルパー
+# ---------- 共通 ----------
 def load_json_file(filename):
     with file_lock:
         if os.path.exists(filename):
@@ -21,85 +22,65 @@ def load_json_file(filename):
                 if not content:
                     return {}
                 return json.loads(content)
-        return {}
+    return {}
 
 def save_json_file(filename, data):
     with file_lock:
         with open(filename, 'w') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"[ファイル書き込み] {filename} -> {list(data.keys())}")
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
-def load_current_turn():
-    data = load_json_file(TURN_FILE)
-    return data.get("current_turn")
-
-def load_heart_data():
-    return load_json_file(DATA_FILE)
-
-def save_heart_data(data):
-    save_json_file(DATA_FILE, data)
-
-# -------------------------
-# ルーティング
-# -------------------------
+# ---------- API ----------
 
 @heart_api.route('/heart', methods=['POST'])
 def post_heart():
-    try:
-        data = request.get_json()
-        print(f"[API] 心拍数POST受信 -> {data}")
+    data = request.get_json()
+    print("[POST] /heart ->", data)
 
-        if not data:
-            return jsonify({"status": "error", "message": "JSONボディがありません"}), 400
+    device_id = data.get('device_id')
+    heartbeat = data["data"]["heartbeat"]
+    timestamp = int(time.time() * 1000)  # ← 修正前は time.strftime('%H:%M:%S')
 
-        device_id = data.get('device_id')
-        timestamp = data.get('timestamp')
-        heartbeat_data = data.get('data')
+    # ■ゲーム中のみ保存
+    game_status = load_json_file(GAME_STATUS_FILE)
+    if not game_status.get("running", False):
+        return jsonify({"status": "ignored", "message": "ゲーム未開始"}), 200
 
-        if not device_id or not timestamp or not heartbeat_data:
-            return jsonify({"status": "error", "message": "必要なフィールドが不足しています"}), 400
+    # ■ターン制御
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    if current_turn and current_turn != device_id:
+        return jsonify({"status": "ignored", "message": "他人のターン"}), 200
 
-        heartbeat = heartbeat_data.get('heartbeat')
-        if heartbeat is None:
-            return jsonify({"status": "error", "message": "heartbeatが含まれていません"}), 400
+    # ---------- 最新心拍保存 ----------
+    data_file = load_json_file(DATA_FILE)
+    if device_id not in data_file:
+        data_file[device_id] = []
 
-        # 現在のターンを確認
-        current_turn = load_current_turn()
-        if current_turn and current_turn != device_id:
-            print(f"[API] 心拍数受信を無視 -> 現在は {current_turn} のターン、受信は {device_id}")
-            return jsonify({"status": "ignored", "message": "現在は他のデバイスのターンです"}), 200
+    data_file[device_id].append({
+        "timestamp": timestamp,
+        "heartbeat": heartbeat
+    })
+    save_json_file(DATA_FILE, data_file)
 
-        # 受け取って保存
-        heart_data = load_heart_data()
-        if device_id not in heart_data:
-            heart_data[device_id] = []
+    # ---------- 履歴（30件だけ保存） ----------
+    history = load_json_file(HISTORY_FILE)
+    if device_id not in history:
+        history[device_id] = []
 
-        heart_data[device_id].append({
-            "timestamp": timestamp,
-            "heartbeat": heartbeat
-        })
+    history[device_id].append({"time": timestamp, "bpm": heartbeat})
+    history[device_id] = history[device_id][-30:]
+    save_json_file(HISTORY_FILE, history)
 
-        save_heart_data(heart_data)
-
-        print(f"[API] 心拍数保存完了 -> {device_id}")
-        return jsonify({"status": "ok"})
-
-    except Exception as e:
-        print(f"[エラー] /heart処理中に例外発生: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify({"status": "ok"})
 
 
 @heart_api.route('/heart', methods=['GET'])
 def get_heart():
     try:
-        heart_data = load_heart_data()
-        latest_data = {}
-        for device_id, history in heart_data.items():
-            if history:
-                latest_data[device_id] = history[-1]
-        print(f"[API] 心拍数取得 -> {latest_data}")
-        return jsonify(latest_data)
-
-    except Exception as e:
-        print(f"[エラー] /heart取得中に例外発生: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        data = load_json_file(DATA_FILE)
+        latest = {}
+        for device_id, rec in data.items():
+            latest[device_id] = rec[-1]   # 最新のみ返す
+        return jsonify(latest)
+    except:
+        
+        return jsonify({})
