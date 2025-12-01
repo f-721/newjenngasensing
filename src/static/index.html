@@ -63,21 +63,23 @@
   const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
 
   function startFetching() {
-    if (intervalId !== null) return;
-    intervalId = setInterval(() => {
-      fetchHeartRate();
-      refreshCurrentTurn();
-    }, 1000);
-    document.getElementById('status').innerText = '状態: 取得中';
-  }
+  if (intervalId !== null) return;
+  intervalId = setInterval(() => {
+    fetchHeartRate();
+    refreshCurrentTurn();
+  }, 1000);
+  document.getElementById('status').innerText = '状態: 取得中';
+  localStorage.setItem("fetchingStatus", "running");  // ← 追加
+}
 
-  function stopFetching() {
-    if (intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-    document.getElementById('status').innerText = '状態: 停止';
+function stopFetching() {
+  if (intervalId !== null) {
+    clearInterval(intervalId);
+    intervalId = null;
   }
+  document.getElementById('status').innerText = '状態: 停止';
+  localStorage.setItem("fetchingStatus", "stopped");  // ← 追加
+}
 
   async function fetchHeartRate() {
     try {
@@ -264,11 +266,17 @@ async function refreshGameStatus() {
   }
 
   window.onload = () => {
+  const prevStatus = localStorage.getItem("fetchingStatus");
+  if (prevStatus === "running") {
+    startFetching();
+  } else {
     document.getElementById('status').innerText = '状態: 停止';
-    refreshGameStatus();
-    refreshCurrentTurn();
-    refreshClientList();
-  };
+  }
+
+  refreshGameStatus();
+  refreshCurrentTurn();
+  refreshClientList();
+};
 
   document.addEventListener('keydown', async (event) => {
     if (event.key === 'Enter') {
