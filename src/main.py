@@ -87,6 +87,7 @@ def reset_server():
     save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False})
     save_json_file(TURN_FILE, {"current_turn": None})
     save_json_file(ASSIGNED_FILE, {})
+
     print("[API] サーバーデータを初期化しました（ID割り当てもリセット）")
     return jsonify({"status": "ok", "message": "サーバーを完全リセットしました"})
 

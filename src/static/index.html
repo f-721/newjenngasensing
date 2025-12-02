@@ -156,13 +156,13 @@
     }
 
 async function startGame() {
+  isGameRunning = true; // ← 最初に即時設定！
   await fetch("/start", { method: "POST" })
     .then(res => res.json())
     .then(data => {
-      isGameRunning = true;
       document.getElementById('game-status').innerText = 'ゲーム状態：開始';
-      refreshGameStatus(); // 状態表示を更新
-      setupGraphs();       // watchごとのグラフ生成
+      refreshGameStatus();
+      setupGraphs();  // ← setupGraphs内でfetchHeartDataが呼ばれる
     });
 }
 
