@@ -151,34 +151,39 @@
         document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
       } catch (error) {
         console.error(error);
-        document.getElementById('game-status').innerText = 'ゲーム状態: 取得失敗';
+        document.getElementById('game-status').innerText = 'ゲーム状態： 取得失敗';
       }
     }
 
 async function startGame() {
-  isGameRunning = true; // ← 最初に即時設定！
+  isGameRunning = true;
   await fetch("/start", { method: "POST" })
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById('game-status').innerText = 'ゲーム状態：開始';
-      refreshGameStatus();
-      setupGraphs();  // ← setupGraphs内でfetchHeartDataが呼ばれる
-    });
+  .then(res => res.json())
+  .then(data => {
+    isGameRunning = true;  // これをここで！
+    document.getElementById('game-status').innerText = 'ゲーム状態：開始';
+    refreshGameStatus();
+    startHeartDataLoop();
+    setupGraphs();         // isGameRunningがtrueの状態で呼ぶ
+    startPlotting();
+  });
 }
 
-    async function stopGame() {
-      try {
-        const res = await fetch('/stop', { method: 'POST' });
-        const data = await res.json();
-        console.log('[JS] POST /stop ->', data);
-        await refreshGameStatus();
-        alert('ゲームを終了しました');
-        document.getElementById('csvBtn').style.display = 'inline-block';
-      } catch (error) {
-        console.error(error);
-        alert('終了リクエスト失敗');
-      }
-    }
+async function stopGame() {
+  isGameRunning = false;
+  try {
+    const res = await fetch('/stop', { method: 'POST' });
+    const data = await res.json();
+    console.log('[JS] POST /stop ->', data);
+    await refreshGameStatus();
+    stopPlotting();  // ← 追加！
+    alert('ゲームを終了しました');
+    document.getElementById('csvBtn').style.display = 'inline-block';
+  } catch (error) {
+    console.error(error);
+    alert('終了リクエスト失敗');
+  }
+}
 
     async function resetServer() {
       if (!confirm("本当にリセットしますか？全データを消去します。")) return;
@@ -312,10 +317,10 @@ async function startGame() {
 };
   let fetchHeartDataIntervalId = null;
 
-  function startHeartDataLoop() {
-    if (fetchHeartDataIntervalId !== null) return;  // すでに起動中ならスキップ
-    fetchHeartDataIntervalId = setInterval(fetchHeartData, 1000);
-  }
+function startHeartDataLoop() {
+  if (heartDataInterval) return;
+  heartDataInterval = setInterval(fetchHeartData, 1000); // 1秒ごとにデータ取得
+}
 
     document.addEventListener('keydown', async (event) => {
       if (event.key === 'Enter') {
@@ -410,22 +415,24 @@ function createGraph(watchId) {
   charts[watchId] = chart;
 }
     // データ取得関数
- function fetchHeartData() {
+async function fetchHeartData() {
   if (!isGameRunning) return;
 
-  fetch('/get_heart_data')
-    .then(res => res.json())
-    .then(data => {
-      for (const watchId in data) {
-        const bpm = data[watchId];
-        updateGraph(watchId, bpm);
-      }
-    })
-    .catch(err => {
-      console.error("心拍数取得エラー:", err);
-    });
+  const response = await fetch('/get_heart_data');
+  const data = await response.json();
 
-  setTimeout(fetchHeartData, 1000); // 毎秒再実行
+  Object.entries(data).forEach(([watchId, records]) => {
+    if (!lineCharts[watchId]) return;
+
+    const chart = lineCharts[watchId];
+    const bpmData = records.map((r, i) => ({
+      x: i,
+      y: r.bpm
+    }));
+
+    chart.data.datasets[0].data = bpmData;
+    chart.update();
+  });
 }
 
 
@@ -447,6 +454,62 @@ async function setupGraphs() {
     console.error("グラフ初期化失敗:", err);
   }
 }
+
+let plotInterval = null;
+
+function startPlotting() {
+  console.log("[startPlotting] 呼び出された！");
+  if (plotInterval) clearInterval(plotInterval);
+
+  plotInterval = setInterval(() => {
+    if (!isGameRunning) {
+      console.log("[startPlotting] isGameRunning false なので何もしない");
+      return;
+    }
+
+    fetch('/get_heart_data')
+      .then(res => res.json())
+      .then(data => {
+        console.log("[startPlotting] データ取得:", data);
+        Object.entries(data).forEach(([watchId, bpm]) => {
+          if (charts[watchId]) {
+            console.log(`[startPlotting] ${watchId} に ${bpm} を反映`);
+            updateGraph(watchId, bpm);
+          } else {
+            console.log(`[startPlotting] ${watchId} は charts に存在しない`);
+          }
+        });
+      });
+  }, 1000);
+}
+
+function startPlotting() {
+  setInterval(async () => {
+    const response = await fetch("/get_heart_data");
+    const data = await response.json();
+
+    const now = Date.now();
+    const past30s = now - 30000;
+
+    for (const watchId in data) {
+      const chart = charts[watchId];
+      if (!chart) continue;
+
+      const filtered = data[watchId].filter(
+        r => r.timestamp >= past30s
+      );
+
+      // index（秒単位）をX軸にする
+      const baseTime = filtered.length > 0 ? filtered[0].timestamp : now;
+
+      chart.data.labels = filtered.map((r, i) => ((r.timestamp - baseTime) / 1000).toFixed(1));
+      chart.data.datasets[0].data = filtered.map(r => r.heartbeat);
+
+      chart.update();
+    }
+  }, 1000);
+}
+
 
   </script>
 </head>

@@ -50,8 +50,11 @@ def load_json_file(filename):
 # -------------------------
 @app.route('/start', methods=['POST'])
 def start_game():
-    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False})
+    # ゲーム開始 → running = True
+    save_json_file(GAME_STATUS_FILE, {"running": True, "game_over": False})
+
     assigned_ids = load_json_file(ASSIGNED_FILE)
+
     if assigned_ids:
         all_ids = sorted(set(assigned_ids.values()))
         save_json_file(TURN_FILE, {"current_turn": all_ids[0]})
@@ -59,6 +62,7 @@ def start_game():
     else:
         save_json_file(TURN_FILE, {"current_turn": None})
         print("[API] ゲーム開始。しかし割り当てIDが存在しません")
+
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
 
 @app.route('/stop', methods=['POST'])
@@ -185,6 +189,7 @@ def export_csv():
 def get_heart_data():
     try:
         all_data = load_json_file(DATA_FILE)
+        print("Loaded heart rate data:", all_data)  # ←追加
         now_ms = int(datetime.now().timestamp() * 1000)
         thirty_sec_ago = now_ms - 30_000
 
