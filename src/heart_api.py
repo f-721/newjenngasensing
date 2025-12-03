@@ -78,7 +78,7 @@ def get_latest_heart_rates():
     current_turn = turn.get("current_turn")
 
     print(f"[API] 現在のターン取得 -> {current_turn}")
-    print(f"[API] heart_data -> {heart_data}")
+    # print(f"[API] heart_data -> {heart_data}")
 
     result = {}
     for device_id, records in heart_data.items():

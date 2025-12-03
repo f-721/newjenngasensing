@@ -50,7 +50,7 @@ def load_json_file(filename):
 # -------------------------
 @app.route('/start', methods=['POST'])
 def start_game():
-    save_json_file(GAME_STATUS_FILE, {"running": True, "game_over": False})
+    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False})
     assigned_ids = load_json_file(ASSIGNED_FILE)
     if assigned_ids:
         all_ids = sorted(set(assigned_ids.values()))
