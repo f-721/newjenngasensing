@@ -176,7 +176,7 @@ async function stopGame() {
     const data = await res.json();
     console.log('[JS] POST /stop ->', data);
     await refreshGameStatus();
-    stopPlotting();  // ← 追加！
+ //   stopPlotting();  // ← 追加！(今これのせいで終了リクエスト失敗してます)
     alert('ゲームを終了しました');
     document.getElementById('csvBtn').style.display = 'inline-block';
   } catch (error) {
@@ -373,45 +373,44 @@ function createGraph(watchId) {
   dataBuffers[watchId] = [];
 
   const chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: Array(30).fill(""),
-      datasets: [{
-        label: '心拍数',
-        data: [],
-        borderColor: 'red',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.3
-      }]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      scales: {
-        x: {
-          title: {
-            display: true,
-            text: '時間（秒前）'
-          },
-          ticks: {
-            callback: function(value, index) {
-              return index + 1; // 1〜30秒
-            }
-          }
+  type: 'line',
+  data: {
+    labels: [], // 時間ラベルは更新関数で管理
+    datasets: [{
+      label: '心拍数',
+      data: [],
+      borderColor: 'red',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      x: {
+        title: {
+          display: true,
+          text: '時間（秒前）'
         },
-        y: {
-          min: 60,
-          max: 120,
-          title: {
-            display: true,
-            text: 'BPM'
+        ticks: {
+          callback: function(value, index, ticks) {
+            return `${30 - (ticks.length - 1 - index)}秒前`;
           }
+        }
+      },
+      y: {
+        min: 60,
+        max: 120,
+        title: {
+          display: true,
+          text: 'BPM'
         }
       }
     }
-  });
-
+  }
+});
   charts[watchId] = chart;
 }
     // データ取得関数
@@ -422,9 +421,9 @@ async function fetchHeartData() {
   const data = await response.json();
 
   Object.entries(data).forEach(([watchId, records]) => {
-    if (!lineCharts[watchId]) return;
-
-    const chart = lineCharts[watchId];
+  // ✅ 修正後
+  if (!charts[watchId]) return;
+  const chart = charts[watchId];
     const bpmData = records.map((r, i) => ({
       x: i,
       y: r.bpm
@@ -449,7 +448,7 @@ async function setupGraphs() {
       createGraph(watchId);
     }
     fetchHeartData();
-    setInterval(fetchHeartData, 1000); // 毎秒取得
+    // setInterval(fetchHeartData, 1000); // 毎秒取得
   } catch (err) {
     console.error("グラフ初期化失敗:", err);
   }
@@ -458,33 +457,11 @@ async function setupGraphs() {
 let plotInterval = null;
 
 function startPlotting() {
-  console.log("[startPlotting] 呼び出された！");
   if (plotInterval) clearInterval(plotInterval);
 
-  plotInterval = setInterval(() => {
-    if (!isGameRunning) {
-      console.log("[startPlotting] isGameRunning false なので何もしない");
-      return;
-    }
+  plotInterval = setInterval(async () => {
+    if (!isGameRunning) return;
 
-    fetch('/get_heart_data')
-      .then(res => res.json())
-      .then(data => {
-        console.log("[startPlotting] データ取得:", data);
-        Object.entries(data).forEach(([watchId, bpm]) => {
-          if (charts[watchId]) {
-            console.log(`[startPlotting] ${watchId} に ${bpm} を反映`);
-            updateGraph(watchId, bpm);
-          } else {
-            console.log(`[startPlotting] ${watchId} は charts に存在しない`);
-          }
-        });
-      });
-  }, 1000);
-}
-
-function startPlotting() {
-  setInterval(async () => {
     const response = await fetch("/get_heart_data");
     const data = await response.json();
 
@@ -495,14 +472,10 @@ function startPlotting() {
       const chart = charts[watchId];
       if (!chart) continue;
 
-      const filtered = data[watchId].filter(
-        r => r.timestamp >= past30s
-      );
-
-      // index（秒単位）をX軸にする
+      const filtered = data[watchId].filter(r => r.timestamp >= past30s);
       const baseTime = filtered.length > 0 ? filtered[0].timestamp : now;
 
-      chart.data.labels = filtered.map((r, i) => ((r.timestamp - baseTime) / 1000).toFixed(1));
+      chart.data.labels = filtered.map(r => ((r.timestamp - baseTime) / 1000).toFixed(1));
       chart.data.datasets[0].data = filtered.map(r => r.heartbeat);
 
       chart.update();
@@ -510,6 +483,46 @@ function startPlotting() {
   }, 1000);
 }
 
+function updateChart(watchId, heartbeat, timestamp) {
+  const dataset = charts[watchId].data.datasets[0];
+  const labels = charts[watchId].data.labels;
+
+  // データ追加
+  dataset.data.push(heartbeat);
+  labels.push(""); // 時間ラベルはカスタムcallbackで描画されるため空文字でOK
+
+  // 最大30件まで保持
+  if (dataset.data.length > 30) {
+    dataset.data.shift();
+    labels.shift();
+  }
+
+  charts[watchId].update();
+}
+
+setInterval(() => {
+  fetch('/get_heart_data')
+    .then(response => response.json())
+    .then(data => {
+      let displayText = "";
+
+      for (const watchId in data) {
+        const entries = data[watchId];
+        entries.forEach(entry => {
+          updateChart(watchId, entry.heartbeat, entry.timestamp);
+        });
+
+        // 最新の心拍数を取得して表示用テキストに追加
+        if (entries.length > 0) {
+          const latest = entries[entries.length - 1];
+          displayText += `心拍数: ${latest.heartbeat} bpm (${watchId})<br>`;
+        }
+      }
+
+      // 上部表示エリアに反映（複数行）
+      document.getElementById("heartRateDisplay").innerHTML = displayText;
+    });
+}, 1000);
 
   </script>
 </head>
