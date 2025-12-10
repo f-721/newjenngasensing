@@ -26,6 +26,7 @@ TURN_FILE = 'turn.json'
 ASSIGNED_FILE = 'assigned_ids.json'
 STATIC_FOLDER = 'static'
 
+
 # -------------------------
 # 共通ヘルパー
 # -------------------------
@@ -50,11 +51,16 @@ def load_json_file(filename):
 # -------------------------
 @app.route('/start', methods=['POST'])
 def start_game():
-    # ゲーム開始 → running = True
-    save_json_file(GAME_STATUS_FILE, {"running": True, "game_over": False})
+    # ゲーム状態をファイルから読み込む
+    game_status = load_json_file(GAME_STATUS_FILE)
 
+    # フラグを更新して保存
+    game_status["running"] = True
+    game_status["game_over"] = False
+    save_json_file(GAME_STATUS_FILE, game_status)
+
+    # IDリストを読み込んで最初のターンをセット
     assigned_ids = load_json_file(ASSIGNED_FILE)
-
     if assigned_ids:
         all_ids = sorted(set(assigned_ids.values()))
         save_json_file(TURN_FILE, {"current_turn": all_ids[0]})
@@ -67,9 +73,15 @@ def start_game():
 
 @app.route('/stop', methods=['POST'])
 def stop_game():
-    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": True})
-    save_json_file(TURN_FILE, {"current_turn": None})
-    print("[API] ゲーム停止 -> ターン解除")
+    # ゲーム状態を読み込む
+    game_status = load_json_file(GAME_STATUS_FILE)
+
+    # フラグを更新
+    game_status["running"] = False
+    game_status["game_over"] = True
+    save_json_file(GAME_STATUS_FILE, game_status)
+
+    print("[API] ゲーム停止しました")
     return jsonify({"status": "ok", "message": "ゲームを停止しました"})
 
 @app.route('/status', methods=['GET'])
@@ -189,7 +201,7 @@ def export_csv():
 def get_heart_data():
     try:
         all_data = load_json_file(DATA_FILE)
-        print("Loaded heart rate data:", all_data)  # ←追加
+        # print("Loaded heart rate data:", all_data)  # ←追加
         now_ms = int(datetime.now().timestamp() * 1000)
         thirty_sec_ago = now_ms - 30_000
 
@@ -201,12 +213,20 @@ def get_heart_data():
                 if entry['timestamp'] >= thirty_sec_ago
             ]
             recent_data[device_id] = recent_entries
+        
+        # jsonに保存された時間及び心拍数の隣り合うデータが1000ms以上開いていた場合 +1000msして最後に保存した心拍数を再度保存する、みたいな処理を加えることで
+        # グラフのプロットの問題は改善できるはず
+        # もしデータがなかったら前のデータ参照、あったらその新しいデータ参照、でもおk
+        # 実際のCSVでの出力の際は間を補填する処理を加えましょう
 
         return jsonify(recent_data)
+
 
     except Exception as e:
         print(f"[エラー] /get_heart_data で例外: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/')
 def serve_index():
     return send_from_directory(STATIC_FOLDER, 'index.html')
@@ -232,3 +252,11 @@ def method_not_allowed(error):
 if __name__ == '__main__':
     print("[APIサーバー起動] 状態維持モードで開始")
     app.run(host='0.0.0.0', port=8080)
+
+# # サーバー起動時に呼ばれる関数に追加（main.py側に記述してもOK）
+# def start_background_threads():
+#     t = threading.Thread(target=heartbeat_complement_worker, daemon=True)
+#     t.start()
+
+# # main.py でFlaskサーバー立ち上げの直前に呼び出し
+# start_background_threads()

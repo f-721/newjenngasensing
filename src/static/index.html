@@ -74,6 +74,10 @@
     let intervalId = null;
     const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
 
+    const MAX_POINTS = 30;
+
+    let heartDataInterval = null;
+
     function startFetching() {
       if (intervalId !== null) return;
       intervalId = setInterval(() => {
@@ -119,15 +123,18 @@
           for (const [device_id, record] of Object.entries(data)) {
             const bpm = record.heartbeat;
             const div = document.createElement('div');
-            div.innerText = `心拍数: ${bpm} bpm (${device_id})`;
+            const bpmText = (bpm !== undefined && bpm !== null) ? `${bpm}` : "--";
+            div.innerText = `心拍数: ${bpmText} bpm (${device_id})`;
             div.style.fontSize = '1.5em';
             div.style.fontWeight = 'bold';
             rateContainer.appendChild(div);
 
+          if (bpm !== undefined && bpm !== null) {
             if (!maxHeartRates[device_id] || bpm > maxHeartRates[device_id]) {
               maxHeartRates[device_id] = bpm;
               localStorage.setItem("maxHeartRates", JSON.stringify(maxHeartRates));
             }
+          }
           }
 
           for (const [device_id, maxBpm] of Object.entries(maxHeartRates)) {
@@ -163,7 +170,6 @@ async function startGame() {
     isGameRunning = true;  // これをここで！
     document.getElementById('game-status').innerText = 'ゲーム状態：開始';
     refreshGameStatus();
-    startHeartDataLoop();
     setupGraphs();         // isGameRunningがtrueの状態で呼ぶ
     startPlotting();
   });
@@ -175,16 +181,16 @@ async function stopGame() {
     const res = await fetch('/stop', { method: 'POST' });
     const data = await res.json();
     console.log('[JS] POST /stop ->', data);
+    stopPlotting();  // ✅ 追加
     await refreshGameStatus();
- //   stopPlotting();  // ← 追加！(今これのせいで終了リクエスト失敗してます)
-    alert('ゲームを終了しました');
     document.getElementById('csvBtn').style.display = 'inline-block';
+    document.getElementById("heartRateDisplay").innerHTML = ''; // ✅ 心拍表示クリア
+    alert('ゲームを終了しました');
   } catch (error) {
     console.error(error);
     alert('終了リクエスト失敗');
   }
 }
-
     async function resetServer() {
       if (!confirm("本当にリセットしますか？全データを消去します。")) return;
       try {
@@ -237,7 +243,7 @@ async function stopGame() {
         document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
       }
     }
-
+    //ゲーム開始の処理
     function setTurn() {
       const selectedId = document.getElementById("turnSelector").value;
       fetch("/set_turn", {
@@ -315,6 +321,14 @@ async function stopGame() {
 
   setupGraphs();
 };
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    console.log("復帰: グラフ強制更新");
+    fetchHeartData();       // 一回強制取得
+    refreshCurrentTurn();   // ターン表示も同期
+  }
+});
   let fetchHeartDataIntervalId = null;
 
 function startHeartDataLoop() {
@@ -388,28 +402,31 @@ function createGraph(watchId) {
   options: {
     animation: false,
     responsive: true,
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: '時間（秒前）'
-        },
-        ticks: {
-          callback: function(value, index, ticks) {
-            return `${30 - (ticks.length - 1 - index)}秒前`;
-          }
-        }
-      },
-      y: {
-        min: 60,
-        max: 120,
-        title: {
-          display: true,
-          text: 'BPM'
-        }
+scales: {
+  x: {
+    type: 'linear',
+    min: 0,
+    max: 30,
+    title: {
+      display: true,
+      text: '時間（秒）'
+    },
+    ticks: {
+      stepSize: 5,
+      callback: function(value) {
+        return `${value}秒前`;
       }
     }
+  },
+  y: {
+    min: 60,
+    max: 120,
+    title: {
+      display: true,
+      text: 'BPM'
+    }
   }
+}  }
 });
   charts[watchId] = chart;
 }
@@ -489,7 +506,7 @@ function updateChart(watchId, heartbeat, timestamp) {
 
   // データ追加
   dataset.data.push(heartbeat);
-  labels.push(""); // 時間ラベルはカスタムcallbackで描画されるため空文字でOK
+  labels.push("none"); // 時間ラベルはカスタムcallbackで描画されるため空文字でOK
 
   // 最大30件まで保持
   if (dataset.data.length > 30) {
@@ -499,31 +516,6 @@ function updateChart(watchId, heartbeat, timestamp) {
 
   charts[watchId].update();
 }
-
-setInterval(() => {
-  fetch('/get_heart_data')
-    .then(response => response.json())
-    .then(data => {
-      let displayText = "";
-
-      for (const watchId in data) {
-        const entries = data[watchId];
-        entries.forEach(entry => {
-          updateChart(watchId, entry.heartbeat, entry.timestamp);
-        });
-
-        // 最新の心拍数を取得して表示用テキストに追加
-        if (entries.length > 0) {
-          const latest = entries[entries.length - 1];
-          displayText += `心拍数: ${latest.heartbeat} bpm (${watchId})<br>`;
-        }
-      }
-
-      // 上部表示エリアに反映（複数行）
-      document.getElementById("heartRateDisplay").innerHTML = displayText;
-    });
-}, 1000);
-
   </script>
 </head>
 <body>
