@@ -196,37 +196,91 @@ def export_csv():
 
     # クライアントにファイル送信（ダウンロード）
     return send_file(filepath, as_attachment=True, download_name="heart_rate_data.csv")
-
-@app.route('/get_heart_data')
+    
+@app.route('/get_heart_data', methods=['GET'])
 def get_heart_data():
     try:
         all_data = load_json_file(DATA_FILE)
-        # print("Loaded heart rate data:", all_data)  # ←追加
         now_ms = int(datetime.now().timestamp() * 1000)
         thirty_sec_ago = now_ms - 30_000
 
-        recent_data = {}
+        complemented_data = {}
 
         for device_id, entries in all_data.items():
+
+            # ---- Get entries from last 30 seconds ----
             recent_entries = [
-                entry for entry in entries
-                if entry['timestamp'] >= thirty_sec_ago
+                entry for entry in entries if entry['timestamp'] >= thirty_sec_ago
             ]
-            recent_data[device_id] = recent_entries
-        
-        # jsonに保存された時間及び心拍数の隣り合うデータが1000ms以上開いていた場合 +1000msして最後に保存した心拍数を再度保存する、みたいな処理を加えることで
-        # グラフのプロットの問題は改善できるはず
-        # もしデータがなかったら前のデータ参照、あったらその新しいデータ参照、でもおk
-        # 実際のCSVでの出力の際は間を補填する処理を加えましょう
+            recent_entries.sort(key=lambda x: x['timestamp'])
 
-        return jsonify(recent_data)
+            if not recent_entries:
+                continue
 
+            filled_entries = []
+            last_entry = recent_entries[0]
+            filled_entries.append(last_entry)
+
+            complement_count = 0
+            last_complement_ts = None
+
+            # ---- Fill missing intervals between samples ----
+            for rec in recent_entries[1:]:
+                diff = rec["timestamp"] - last_entry["timestamp"]
+
+                if diff > 1000:
+                    missing_count = diff // 1000 - 1
+                    for i in range(missing_count):
+                        fake_ts = last_entry["timestamp"] + 1000 * (i + 1)
+                        filled_entries.append({
+                            "timestamp": fake_ts,
+                            "heartbeat": last_entry["heartbeat"]
+                        })
+                        complement_count += 1
+                        last_complement_ts = fake_ts
+
+                filled_entries.append(rec)
+                last_entry = rec
+
+            # ---- Fill from last entry to current time (existing logic) ----
+            while last_entry["timestamp"] + 1000 < now_ms - 200:  # 200ms buffer
+                fake_ts = last_entry["timestamp"] + 1000
+                filled_entries.append({
+                    "timestamp": fake_ts,
+                    "heartbeat": last_entry["heartbeat"]
+                })
+                complement_count += 1
+                last_complement_ts = fake_ts
+                last_entry = {
+                    "timestamp": fake_ts,
+                    "heartbeat": last_entry["heartbeat"]
+                }
+
+            # ✅ 追加：もし「最後の時刻」が現在より前なら、それも補完
+            if last_entry["timestamp"] < now_ms - 200:
+                while last_entry["timestamp"] + 1000 <= now_ms:
+                    fake_ts = last_entry["timestamp"] + 1000
+                    filled_entries.append({
+                        "timestamp": fake_ts,
+                        "heartbeat": last_entry["heartbeat"]
+                    })
+                    complement_count += 1
+                    last_complement_ts = fake_ts
+                    last_entry = {
+                        "timestamp": fake_ts,
+                        "heartbeat": last_entry["heartbeat"]
+                    }
+
+            if complement_count > 0:
+                print(f"[補完] {device_id}: reused previous value {last_entry['heartbeat']} {complement_count} times (last at {last_complement_ts})")
+
+            complemented_data[device_id] = filled_entries
+
+        return jsonify(complemented_data)
 
     except Exception as e:
-        print(f"[エラー] /get_heart_data で例外: {e}")
+        print(f"[ERROR] get_heart_data failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
-
 @app.route('/')
 def serve_index():
     return send_from_directory(STATIC_FOLDER, 'index.html')
@@ -252,11 +306,3 @@ def method_not_allowed(error):
 if __name__ == '__main__':
     print("[APIサーバー起動] 状態維持モードで開始")
     app.run(host='0.0.0.0', port=8080)
-
-# # サーバー起動時に呼ばれる関数に追加（main.py側に記述してもOK）
-# def start_background_threads():
-#     t = threading.Thread(target=heartbeat_complement_worker, daemon=True)
-#     t.start()
-
-# # main.py でFlaskサーバー立ち上げの直前に呼び出し
-# start_background_threads()

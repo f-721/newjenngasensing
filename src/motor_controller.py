@@ -45,8 +45,10 @@ def rotary(direction, stepSpeed):
 # ここで速度の調整を行います
 def calculate_rpm(bpm):
     if bpm <= 70:
+        return 0  # 動かない
+    elif bpm <= 75:
         return 10
-    elif bpm <= 80:
+    elif bpm <= 85:
         return 20
     else:
         return 30

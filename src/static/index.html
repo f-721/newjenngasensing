@@ -153,8 +153,9 @@
 
     async function refreshGameStatus() {
       try {
-        const res = await fetch('/status');
+        const res = await fetch('/status', { cache: "no-store" });
         const data = await res.json();
+        console.log('[DEBUG] /status data:', data); // ← デバッグ用
         document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
       } catch (error) {
         console.error(error);
@@ -181,10 +182,17 @@ async function stopGame() {
     const res = await fetch('/stop', { method: 'POST' });
     const data = await res.json();
     console.log('[JS] POST /stop ->', data);
-    stopPlotting();  // ✅ 追加
+
+    if (typeof stopPlotting === "function") {
+      stopPlotting();
+    }
+    stopFetching();        // ✅ データ取得も停止 ← 追加！
     await refreshGameStatus();
     document.getElementById('csvBtn').style.display = 'inline-block';
-    document.getElementById("heartRateDisplay").innerHTML = ''; // ✅ 心拍表示クリア
+     const heartEl = document.getElementById("heartRateDisplay");
+    if (heartEl) {
+      heartEl.innerHTML = '';
+    }
     alert('ゲームを終了しました');
   } catch (error) {
     console.error(error);
@@ -306,7 +314,7 @@ async function stopGame() {
       return `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`;
     }
 
- window.onload = () => {
+window.onload = async () => {
   const prevStatus = localStorage.getItem("fetchingStatus");
   if (prevStatus === "running") {
     startFetching();
@@ -314,12 +322,22 @@ async function stopGame() {
     document.getElementById('status').innerText = '状態: 停止';
   }
 
-  refreshGameStatus();
-  refreshCurrentTurn();
-  refreshClientList();
+  await refreshGameStatus();
+  await refreshCurrentTurn();
+  await refreshClientList();
+  await setupGraphs();
 
-
-  setupGraphs();
+  // 🔁 状態を取得して、ゲーム中ならグラフ描画も再開
+  try {
+    const res = await fetch('/status');
+    const status = await res.json();
+    if (status.running) {
+      isGameRunning = true;
+      startPlotting();
+    }
+  } catch (e) {
+    console.error("ゲーム状態取得失敗", e);
+  }
 };
 
 document.addEventListener("visibilitychange", () => {
@@ -404,20 +422,21 @@ function createGraph(watchId) {
     responsive: true,
 scales: {
   x: {
-    type: 'linear',
-    min: 0,
-    max: 30,
-    title: {
-      display: true,
-      text: '時間（秒）'
-    },
-    ticks: {
-      stepSize: 5,
-      callback: function(value) {
-        return `${value}秒前`;
-      }
-    }
+  type: 'linear',
+  min: 0,
+  max: 30,
+  reverse: true, // ← これを追加！
+  title: {
+    display: true,
+    text: '時間（秒）'
   },
+  ticks: {
+    stepSize: 5,
+    callback: function(value) {
+      return `${value}秒前`;
+    }
+  }
+},
   y: {
     min: 60,
     max: 120,
@@ -437,20 +456,21 @@ async function fetchHeartData() {
   const response = await fetch('/get_heart_data');
   const data = await response.json();
 
+  const now = Date.now();  // ✅ ← これが抜けてるとx軸が壊れる！
+
   Object.entries(data).forEach(([watchId, records]) => {
-  // ✅ 修正後
-  if (!charts[watchId]) return;
-  const chart = charts[watchId];
-    const bpmData = records.map((r, i) => ({
-      x: i,
-      y: r.bpm
+    if (!charts[watchId]) return;
+    const chart = charts[watchId];
+
+    const bpmData = records.map(r => ({
+      x: ((now - r.timestamp) / 1000),
+      y: r.heartbeat
     }));
 
     chart.data.datasets[0].data = bpmData;
     chart.update();
   });
 }
-
 
 async function setupGraphs() {
   try {
@@ -492,14 +512,23 @@ function startPlotting() {
       const filtered = data[watchId].filter(r => r.timestamp >= past30s);
       const baseTime = filtered.length > 0 ? filtered[0].timestamp : now;
 
-      chart.data.labels = filtered.map(r => ((r.timestamp - baseTime) / 1000).toFixed(1));
-      chart.data.datasets[0].data = filtered.map(r => r.heartbeat);
+      chart.data.labels = filtered.map(r => ((now - r.timestamp) / 1000).toFixed(0)); // 秒前で統一
+      chart.data.datasets[0].data = filtered.map(r => ({
+        x: ((now - r.timestamp) / 1000),
+        y: r.heartbeat
+      }));
 
       chart.update();
     }
   }, 1000);
 }
 
+function stopPlotting() {
+  if (plotInterval) {
+    clearInterval(plotInterval);
+    plotInterval = null;
+  }
+}
 function updateChart(watchId, heartbeat, timestamp) {
   const dataset = charts[watchId].data.datasets[0];
   const labels = charts[watchId].data.labels;
