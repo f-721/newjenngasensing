@@ -49,9 +49,9 @@ def calculate_rpm(bpm):
     elif bpm <= 75:
         return 10
     elif bpm <= 85:
-        return 20
+        return 15
     else:
-        return 30
+        return 20
 
 # --------------------
 # API通信

@@ -545,6 +545,24 @@ function updateChart(watchId, heartbeat, timestamp) {
 
   charts[watchId].update();
 }
+
+// document.getElementById('reset-button').addEventListener('click', async () => {
+//   if (confirm("本当に全IDを初期化してもよろしいですか？")) {
+//     try {
+//       const response = await fetch('/reset', { method: 'POST' });
+//       const result = await response.json();
+//       if (result.status === 'ok') {
+//         alert('初期化が完了しました');
+//         location.reload();  // 状態更新のためリロード（任意）
+//       } else {
+//         alert('初期化に失敗しました: ' + result.message);
+//       }
+//     } catch (error) {
+//       console.error('[ERROR] 初期化リクエスト失敗:', error);
+//       alert('通信エラーが発生しました');
+//     }
+//   }
+// });
   </script>
 </head>
 <body>
@@ -573,6 +591,8 @@ function updateChart(watchId, heartbeat, timestamp) {
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
     <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>
     <button onclick="exportCSV()" id="csvBtn" style="display: none; background-color: #9C27B0;">CSV保存</button>
+    <br>
+    <!-- <button id="reset-button">ID初期化</button> -->
      <h2>心拍数グラフ（30秒表示、リアルタイム更新）</h2>
   <div id="graph-area" class="graph-container"></div>
   </div>

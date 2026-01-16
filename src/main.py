@@ -289,6 +289,14 @@ def serve_index():
 def serve_graph():
     return send_from_directory(STATIC_FOLDER, 'graph.html')
 
+@app.route('/speed.html')
+def serve_speed():
+    return send_from_directory(STATIC_FOLDER, 'speed.html')
+
+@app.route('/babanuki.html')
+def serve_babanuki():
+    return send_from_directory(STATIC_FOLDER, 'babanuki.html')
+
 @app.route('/favicon.ico')
 def favicon():
     return '', 204

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ババ抜き 心拍グラフ</title>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f0f8ff;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 { text-align:center; margin: 0 0 10px; color:#333; }
+
+    .status {
+      text-align:center;
+      font-weight:bold;
+      margin: 8px 0;
+    }
+
+    .button-container {
+      text-align:center;
+      margin: 16px 0 10px;
+    }
+    button {
+      font-size: 1.1em;
+      padding: 10px 18px;
+      margin: 8px;
+      border: none;
+      border-radius: 8px;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover { background-color: #45a049; }
+    button:disabled { opacity: .45; cursor:not-allowed; }
+
+    .stop-button { background-color: #f44336; }
+    .stop-button:hover { background-color: #e53935; }
+
+    .csv-button { background-color: #9C27B0; display:none; }
+    .csv-button:hover { background-color: #8E24AA; }
+
+    .graph-title { text-align:center; margin: 18px 0 10px; }
+
+  .graph-container{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    justify-items: stretch;
+  }
+
+    .watch-graph {
+      width: auto;
+      min-width: 0;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+      padding: 12px 12px 10px;
+    }
+
+    .watch-head {
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .watch-name {
+      font-weight: 800;
+      color:#333;
+      font-size: 18px;
+    }
+    .bpm-big {
+      font-weight: 900;
+      font-size: 44px;
+      line-height: 1;
+      color:#111;
+      white-space: nowrap;
+    }
+    .bpm-big small {
+      font-size: 16px;
+      font-weight: 700;
+      color:#444;
+      margin-left: 6px;
+    }
+
+    .warn-box {
+      margin-top: 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #fff0f0;
+      border: 1px solid #ffb3b3;
+      color: #b00020;
+      font-weight: 800;
+      display: none; /* デフォルト非表示 */
+    }
+    .warn-box.show { display: block; }
+
+    .meta {
+      margin-top: 6px;
+      color: #666;
+      font-size: 12px;
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      background:#f6f6f6;
+      border:1px solid #e6e6e6;
+      border-radius:999px;
+      padding: 4px 10px;
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+  <h1>ババ抜き：心拍グラフ（30秒表示）</h1>
+
+  <div id="watch-count" class="status">接続中のデバイス数: --</div>
+  <div id="game-status" class="status">ゲーム状態: --</div>
+
+  <div class="button-container">
+    <button id="startBtn">ゲーム開始</button>
+    <button id="stopBtn" class="stop-button" disabled>ゲーム終了</button>
+    <button id="csvBtn" class="csv-button">CSV保存</button>
+  </div>
+
+  <h2 class="graph-title">心拍数グラフ（接続デバイス数分）</h2>
+  <div id="graph-area" class="graph-container"></div>
+
+<script>
+  // ===== 設定 =====
+  const POLL_MS = 1000;
+  const SUSPICIOUS_BPM = 90;      // ← 警告閾値（とりあえず90）
+  const WARN_HOLD_MS = 1500;      // ← ちょい安定化（1.5秒以上超えたら警告）
+  const WARN_COOLDOWN_MS = 2000;  // ← 連続チカチカ防止（2秒）
+
+  // ===== 状態 =====
+  let isGameRunning = false;
+  let plotInterval = null;
+
+  let watchIds = [];          // /clientsから取得したwatchID配列
+  const charts = {};          // watchID -> Chart instance
+
+  // watchごとの表示・警告制御
+  const lastBpm = {};         // watchID -> number
+  const lastTs = {};          // watchID -> timestamp(ms)
+  const overSince = {};       // watchID -> Date.now() (閾値超え始め)
+  const lastWarnAt = {};      // watchID -> Date.now() (最後に警告を出した時刻)
+
+  // ===== ユーティリティ =====
+  function $(id) { return document.getElementById(id); }
+
+  function msAgo(ts) {
+    if (!ts) return "--";
+    const d = Date.now() - ts;
+    if (d < 1500) return "今";
+    return Math.round(d / 1000) + "秒前";
+  }
+
+  async function refreshClients() {
+    const res = await fetch("/clients", { cache: "no-store" });
+    const data = await res.json(); // {count, ids:{ip:watchX}}
+    $("watch-count").innerText = `接続中のデバイス数: ${data.count}`;
+    return Object.values(data.ids || {}).sort();
+  }
+
+  async function refreshGameStatus() {
+    try {
+      const res = await fetch("/status", { cache: "no-store" });
+      const data = await res.json(); // {running, game_over}
+      $("game-status").innerText = "ゲーム状態: " + (data.running ? "開始中" : "終了");
+      return !!data.running;
+    } catch (e) {
+      $("game-status").innerText = "ゲーム状態: 取得失敗";
+      return false;
+    }
+  }
+
+  function createGraph(watchId) {
+    const container = $("graph-area");
+
+    const div = document.createElement("div");
+    div.className = "watch-graph";
+    div.innerHTML = `
+      <div class="watch-head">
+        <div class="watch-name">${watchId}</div>
+        <div class="bpm-big" id="bpm-${watchId}">--<small>bpm</small></div>
+      </div>
+
+      <canvas id="chart-${watchId}" height="220"></canvas>
+
+      <div class="warn-box" id="warn-${watchId}">
+        ⚠️ ${watchId} がババを持っているかもしれない…
+      </div>
+
+      <div class="meta">
+        <span class="pill" id="recv-${watchId}">受信: --</span>
+        <span class="pill" id="max-${watchId}">最大: --</span>
+        <span class="pill" id="avg-${watchId}">平均: --</span>
+      </div>
+    `;
+    container.appendChild(div);
+
+    const ctx = document.getElementById(`chart-${watchId}`).getContext("2d");
+
+    // 統計用
+    lastBpm[watchId] = null;
+    lastTs[watchId] = 0;
+    overSince[watchId] = null;
+    lastWarnAt[watchId] = 0;
+    const stat = { max: null, sum: 0, n: 0 };
+
+    charts[watchId] = new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [{
+          label: "心拍数",
+          data: [],
+          borderColor: "red",
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25
+        }]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            type: "linear",
+            min: 0,
+            max: 30,
+            reverse: true,
+            title: { display: true, text: "時間（秒前）" },
+            ticks: { stepSize: 5, callback: (v) => `${v}秒前` }
+          },
+          y: {
+            min: 50,
+            max: 140,
+            title: { display: true, text: "BPM" }
+          }
+        }
+      }
+    });
+
+    // statsは chart に紐付けて持つ
+    charts[watchId]._stat = stat;
+  }
+
+  async function setupGraphs() {
+    watchIds = await refreshClients();
+    $("graph-area").innerHTML = "";
+    for (const id of watchIds) createGraph(id);
+  }
+
+  function updateStatsUI(watchId, bpm, sampleTs) {
+    const stat = charts[watchId]?._stat;
+    if (!stat) return;
+
+    // 新しいサンプルのときだけ加算（補完値もtimestampが進むので基本は加算される）
+    if (sampleTs && sampleTs > (lastTs[watchId] || 0)) {
+      lastTs[watchId] = sampleTs;
+
+      stat.sum += bpm;
+      stat.n += 1;
+      stat.max = (stat.max == null) ? bpm : Math.max(stat.max, bpm);
+
+      $(`max-${watchId}`).textContent = `最大: ${stat.max}`;
+      $(`avg-${watchId}`).textContent = `平均: ${Math.round(stat.sum / stat.n)}`;
+    }
+  }
+
+  function updateWarning(watchId, bpm) {
+    const now = Date.now();
+    const warnEl = $(`warn-${watchId}`);
+
+    // 閾値超え
+    if (bpm >= SUSPICIOUS_BPM) {
+      if (overSince[watchId] == null) overSince[watchId] = now;
+
+      const held = now - overSince[watchId];
+      const cooled = now - (lastWarnAt[watchId] || 0);
+
+      if (held >= WARN_HOLD_MS && cooled >= WARN_COOLDOWN_MS) {
+        warnEl.classList.add("show");
+        lastWarnAt[watchId] = now;
+      }
+    } else {
+      overSince[watchId] = null;
+      warnEl.classList.remove("show");
+    }
+  }
+
+  async function plotOnce() {
+    if (!isGameRunning) return;
+
+    const res = await fetch("/get_heart_data", { cache: "no-store" });
+    const data = await res.json(); // {watch1:[...], watch2:[...], ...}
+
+    const now = Date.now();
+
+    for (const watchId of watchIds) {
+      const chart = charts[watchId];
+      const records = data[watchId];
+      if (!chart || !Array.isArray(records) || records.length === 0) continue;
+
+      // グラフ
+      chart.data.datasets[0].data = records.map(r => ({
+        x: (now - r.timestamp) / 1000,
+        y: r.heartbeat
+      }));
+      chart.update();
+
+      // 最新値（末尾が最新前提、念のため最大timestamp探す）
+      let latest = records[records.length - 1];
+      for (let i = records.length - 2; i >= 0 && i >= records.length - 10; i--) {
+        if (records[i].timestamp > latest.timestamp) latest = records[i];
+      }
+
+      const bpm = Math.round(latest.heartbeat);
+      $(`bpm-${watchId}`).innerHTML = `${bpm}<small>bpm</small>`;
+      $(`recv-${watchId}`).textContent = `受信: ${msAgo(latest.timestamp)}`;
+
+      updateStatsUI(watchId, bpm, latest.timestamp);
+      updateWarning(watchId, bpm);
+    }
+  }
+
+  function startPlotting() {
+    stopPlotting();
+    plotOnce();
+    plotInterval = setInterval(plotOnce, POLL_MS);
+  }
+
+  function stopPlotting() {
+    if (plotInterval) {
+      clearInterval(plotInterval);
+      plotInterval = null;
+    }
+  }
+
+  async function startGame() {
+    const ids = await refreshClients();
+    if (ids.length < 2) {
+      alert("watchが2台以上接続されていません");
+      return;
+    }
+
+    const res = await fetch("/start", { method: "POST" });
+    if (!res.ok) {
+      alert("ゲーム開始に失敗しました");
+      return;
+    }
+
+    isGameRunning = true;
+    $("startBtn").disabled = true;
+    $("stopBtn").disabled = false;
+    $("csvBtn").style.display = "none";
+
+    await refreshGameStatus();
+    await setupGraphs();
+    startPlotting();
+  }
+
+  async function stopGame() {
+    try { await fetch("/stop", { method: "POST" }); } catch {}
+
+    isGameRunning = false;
+    stopPlotting();
+
+    $("startBtn").disabled = false;
+    $("stopBtn").disabled = true;
+    $("csvBtn").style.display = "inline-block";
+
+    await refreshGameStatus();
+    await refreshClients();
+
+    alert("ゲームを終了しました");
+  }
+
+  async function exportCSV() {
+    if (!confirm("CSVファイルを保存しますか？（ゲーム終了後のみ）")) return;
+    try {
+      const res = await fetch("/export_csv");
+      if (!res.ok) {
+        const msg = await res.text();
+        alert("CSV保存に失敗: " + msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "heart_rate_data.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("CSV保存に失敗しました");
+    }
+  }
+
+  // ===== イベント =====
+  $("startBtn").addEventListener("click", startGame);
+  $("stopBtn").addEventListener("click", stopGame);
+  $("csvBtn").addEventListener("click", exportCSV);
+
+  // 起動時：状態反映
+  (async () => {
+    const running = await refreshGameStatus();
+    await setupGraphs();
+
+    if (running) {
+      isGameRunning = true;
+      $("startBtn").disabled = true;
+      $("stopBtn").disabled = false;
+      $("csvBtn").style.display = "none";
+      startPlotting();
+    } else {
+      $("startBtn").disabled = false;
+      $("stopBtn").disabled = true;
+      $("csvBtn").style.display = "none";
+    }
+
+    // 接続台数の表示だけは更新し続ける
+    setInterval(refreshClients, 1000);
+  })();
+</script>
+</body>
+</html>
