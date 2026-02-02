@@ -49,25 +49,53 @@ def load_json_file(filename):
 # -------------------------
 # APIエンドポイント
 # -------------------------
+# @app.route('/start', methods=['POST'])
+# def start_game():
+#     # ゲーム状態をファイルから読み込む
+#     game_status = load_json_file(GAME_STATUS_FILE)
+
+#     # フラグを更新して保存
+#     game_status["running"] = True
+#     game_status["game_over"] = False
+#     save_json_file(GAME_STATUS_FILE, game_status)
+
+#     # IDリストを読み込んで最初のターンをセット
+#     assigned_ids = load_json_file(ASSIGNED_FILE)
+#     if assigned_ids:
+#         all_ids = sorted(set(assigned_ids.values()))
+#         save_json_file(TURN_FILE, {"current_turn": all_ids[0]})
+#         print(f"[API] ゲーム開始。最初のターン: {all_ids[0]}")
+#     else:
+#         save_json_file(TURN_FILE, {"current_turn": None})
+#         print("[API] ゲーム開始。しかし割り当てIDが存在しません")
+
+#     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
+
 @app.route('/start', methods=['POST'])
 def start_game():
-    # ゲーム状態をファイルから読み込む
-    game_status = load_json_file(GAME_STATUS_FILE)
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    baseline_data = load_json_file("baseline_heart_rates.json")
 
-    # フラグを更新して保存
+    missing = []
+    for ip, device_id in assigned_ids.items():
+        if device_id not in baseline_data:
+            missing.append(device_id)
+
+    if missing:
+        return jsonify({
+            "status": "error",
+            "message": f"以下のwatchの平均値データがありません: {', '.join(missing)}"
+        }), 400
+
+    # 通常の開始処理
+    game_status = load_json_file(GAME_STATUS_FILE)
     game_status["running"] = True
     game_status["game_over"] = False
     save_json_file(GAME_STATUS_FILE, game_status)
 
-    # IDリストを読み込んで最初のターンをセット
-    assigned_ids = load_json_file(ASSIGNED_FILE)
-    if assigned_ids:
-        all_ids = sorted(set(assigned_ids.values()))
-        save_json_file(TURN_FILE, {"current_turn": all_ids[0]})
-        print(f"[API] ゲーム開始。最初のターン: {all_ids[0]}")
-    else:
-        save_json_file(TURN_FILE, {"current_turn": None})
-        print("[API] ゲーム開始。しかし割り当てIDが存在しません")
+    # ターン設定
+    ids = sorted(set(assigned_ids.values()))
+    save_json_file(TURN_FILE, {"current_turn": ids[0] if ids else None})
 
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
 
@@ -103,6 +131,7 @@ def reset_server():
     save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False})
     save_json_file(TURN_FILE, {"current_turn": None})
     save_json_file(ASSIGNED_FILE, {})
+    save_json_file("baseline_heart_rates.json", {})  # ← これ追加！
 
     print("[API] サーバーデータを初期化しました（ID割り当てもリセット）")
     return jsonify({"status": "ok", "message": "サーバーを完全リセットしました"})
@@ -285,9 +314,43 @@ def get_heart_data():
 def serve_index():
     return send_from_directory(STATIC_FOLDER, 'index.html')
 
-@app.route('/graph.html')
-def serve_graph():
-    return send_from_directory(STATIC_FOLDER, 'graph.html')
+@app.route("/set_baseline", methods=["POST"])
+def set_baseline():
+    data = request.get_json()
+    device_id = data.get("device_id")
+    bpm = data.get("bpm")
+    if not device_id or bpm is None:
+        return jsonify({"status": "error", "message": "IDかBPMが不足"}), 400
+
+    path = "baseline_bpm.json"
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            baselines = json.load(f)
+    else:
+        baselines = {}
+
+    baselines[device_id] = bpm
+    with open(path, "w") as f:
+        json.dump(baselines, f, indent=2)
+
+    print(f"[基準BPM設定] {device_id} → {bpm}")
+    return jsonify({"status": "ok", "message": f"{device_id} の基準心拍数を {bpm} に設定"})
+
+@app.route('/calculate_baseline/<device_id>', methods=['POST'])
+def calculate_baseline(device_id):
+    all_data = load_json_file(DATA_FILE)
+    entries = all_data.get(device_id, [])
+    if len(entries) < 10:
+        return jsonify({"status": "error", "message": f"{device_id} のデータが不足しています"}), 400
+
+    last_entries = entries[-10:]
+    avg = sum([e["heartbeat"] for e in last_entries]) / len(last_entries)
+
+    baseline_data = load_json_file("baseline_heart_rates.json")
+    baseline_data[device_id] = round(avg)
+    save_json_file("baseline_heart_rates.json", baseline_data)
+
+    return jsonify({"status": "ok", "average": avg})
 
 @app.route('/speed.html')
 def serve_speed():

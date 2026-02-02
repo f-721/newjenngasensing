@@ -164,16 +164,21 @@
     }
 
 async function startGame() {
-  isGameRunning = true;
-  await fetch("/start", { method: "POST" })
-  .then(res => res.json())
-  .then(data => {
-    isGameRunning = true;  // これをここで！
-    document.getElementById('game-status').innerText = 'ゲーム状態：開始';
-    refreshGameStatus();
-    setupGraphs();         // isGameRunningがtrueの状態で呼ぶ
-    startPlotting();
-  });
+  try {
+    const res = await fetch("/start", { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      alert("ゲームを開始しました");
+      refreshGameStatus();
+      setupGraphs();
+      startPlotting();
+    } else {
+      alert(data.message || "ゲーム開始失敗");
+    }
+  } catch (e) {
+    console.error(e);
+    alert("ゲーム開始通信エラー");
+  }
 }
 
 async function stopGame() {
@@ -218,6 +223,25 @@ async function stopGame() {
       }
     }
 
+async function calculateBaseline() {
+  const selectedId = document.getElementById("turnSelector").value;
+  if (!selectedId) return alert("デバイスIDが選択されていません");
+
+  try {
+    const res = await fetch(`/calculate_baseline/${selectedId}`, {
+      method: "POST"
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(`平均BPM: ${data.average}`);
+    } else {
+      alert(data.message || "平均取得に失敗しました");
+    }
+  } catch (err) {
+    console.error("平均取得エラー", err);
+    alert("通信エラーが発生しました");
+  }
+}
     async function refreshCurrentTurn() {
       try {
         const res = await fetch('/turn');
@@ -232,25 +256,39 @@ async function stopGame() {
       }
     }
 
-    async function refreshClientList() {
-      const selector = document.getElementById("turnSelector");
-      selector.innerHTML = "";
-      try {
-        const res = await fetch("/clients");
-        const data = await res.json();
-        document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
-        for (const ip in data.ids) {
-          const id = data.ids[ip];
-          const option = document.createElement("option");
-          option.value = id;
-          option.textContent = id;
-          selector.appendChild(option);
-        }
-      } catch (e) {
-        console.error(e);
-        document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
-      }
+    function calculateSelectedBaseline() {
+  calculateBaseline();
+}
+
+async function refreshClientList() {
+  const selector = document.getElementById("turnSelector");
+  const baselineSelector = document.getElementById("baselineSelector"); // ← 追加
+  selector.innerHTML = "";
+  baselineSelector.innerHTML = ""; // ← 追加
+
+  try {
+    const res = await fetch("/clients");
+    const data = await res.json();
+
+    document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
+    for (const ip in data.ids) {
+      const id = data.ids[ip];
+      const option1 = document.createElement("option");
+      option1.value = id;
+      option1.textContent = id;
+      selector.appendChild(option1);
+
+      const option2 = document.createElement("option"); // ← baselineSelectorにも追加
+      option2.value = id;
+      option2.textContent = id;
+      baselineSelector.appendChild(option2);
     }
+  } catch (e) {
+    console.error(e);
+    document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
+  }
+}
+
     //ゲーム開始の処理
     function setTurn() {
       const selectedId = document.getElementById("turnSelector").value;
@@ -545,24 +583,8 @@ function updateChart(watchId, heartbeat, timestamp) {
 
   charts[watchId].update();
 }
+document.getElementById("baseline-result").innerText = `平均BPM: ${data.average}（${selectedId}）`;
 
-// document.getElementById('reset-button').addEventListener('click', async () => {
-//   if (confirm("本当に全IDを初期化してもよろしいですか？")) {
-//     try {
-//       const response = await fetch('/reset', { method: 'POST' });
-//       const result = await response.json();
-//       if (result.status === 'ok') {
-//         alert('初期化が完了しました');
-//         location.reload();  // 状態更新のためリロード（任意）
-//       } else {
-//         alert('初期化に失敗しました: ' + result.message);
-//       }
-//     } catch (error) {
-//       console.error('[ERROR] 初期化リクエスト失敗:', error);
-//       alert('通信エラーが発生しました');
-//     }
-//   }
-// });
   </script>
 </head>
 <body>
@@ -572,6 +594,7 @@ function updateChart(watchId, heartbeat, timestamp) {
   <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
   <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
   <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="baseline-result" style="font-weight:bold; color:#333; margin-top:10px;"></div>
 
   <div class="flex-container">
     <div id="rate"><p>読み込み中...</p></div>
@@ -587,6 +610,9 @@ function updateChart(watchId, heartbeat, timestamp) {
     <button onclick="startFetching()">取得開始</button>
     <button class="stop-button" onclick="stopFetching()">取得停止</button>
     <br>
+    <select id="baselineSelector"></select>
+    <button onclick="calculateBaseline()">平均取得</button>
+    <hr>
     <button onclick="startGame()">ゲーム開始</button>
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
     <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>

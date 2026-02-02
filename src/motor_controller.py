@@ -43,15 +43,26 @@ def rotary(direction, stepSpeed):
                     GPIO.output(motorPins[i], (0x99 << j) & (0x80 >> i))
             sleep(stepSpeed)
 # ここで速度の調整を行います
-def calculate_rpm(bpm):
-    if bpm <= 70:
-        return 0  # 動かない
-    elif bpm <= 75:
+# def calculate_rpm(bpm):
+#     if bpm <= 70:
+#         return 0  # 動かない
+#     elif bpm <= 75:
+#         return 10
+#     elif bpm <= 85:
+#         return 15
+#     else:
+#         return 20
+
+def calculate_rpm(bpm, baseline_bpm):
+    diff = bpm - baseline_bpm
+    if diff < 5:
+        return 0  # 小さな変化は無視
+    elif diff < 10:
         return 10
-    elif bpm <= 85:
-        return 15
-    else:
+    elif diff < 20:
         return 20
+    else:
+        return 30
 
 # --------------------
 # API通信
