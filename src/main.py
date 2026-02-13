@@ -25,6 +25,8 @@ GAME_STATUS_FILE = 'game_status.json'
 TURN_FILE = 'turn.json'
 ASSIGNED_FILE = 'assigned_ids.json'
 STATIC_FOLDER = 'static'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, '../heart_rates.json'))
 
 
 # -------------------------
@@ -336,21 +338,50 @@ def set_baseline():
     print(f"[基準BPM設定] {device_id} → {bpm}")
     return jsonify({"status": "ok", "message": f"{device_id} の基準心拍数を {bpm} に設定"})
 
+@app.route('/start_baseline', methods=['POST'])
+def start_baseline():
+    status = load_json_file(GAME_STATUS_FILE)
+    status["baseline_mode"] = True
+    status["running"] = False
+    status["game_over"] = False
+    save_json_file(GAME_STATUS_FILE, status)
+    print("[GAME] ベースライン取得モード開始")
+    return jsonify({"status": "ok", "mode": "baseline"})
+
 @app.route('/calculate_baseline/<device_id>', methods=['POST'])
 def calculate_baseline(device_id):
-    all_data = load_json_file(DATA_FILE)
-    entries = all_data.get(device_id, [])
-    if len(entries) < 10:
-        return jsonify({"status": "error", "message": f"{device_id} のデータが不足しています"}), 400
 
-    last_entries = entries[-10:]
-    avg = sum([e["heartbeat"] for e in last_entries]) / len(last_entries)
+    time.sleep(1.2)  # ← 補完が1回入るのを待つ
 
-    baseline_data = load_json_file("baseline_heart_rates.json")
-    baseline_data[device_id] = round(avg)
-    save_json_file("baseline_heart_rates.json", baseline_data)
+    data_file = load_json_file(DATA_FILE)
+    records = data_file.get(device_id, [])
 
-    return jsonify({"status": "ok", "average": avg})
+    now = int(time.time() * 1000)
+    ten_sec_ago = now - 10000
+
+    recent = [
+        r["heartbeat"]
+        for r in records
+        if r["timestamp"] >= ten_sec_ago
+    ]
+
+    if len(recent) < 5:
+        return jsonify({"error":"最低5件必要"}),400
+
+    avg = sum(recent) / len(recent)
+
+    print(f"[BASELINE OK] {device_id} avg={avg} samples={len(recent)}")
+
+    return jsonify({"average":avg})
+
+@app.route('/stop_baseline', methods=['POST'])
+def stop_baseline():
+    status = load_json_file(GAME_STATUS_FILE)
+    status["baseline_mode"] = False
+    save_json_file(GAME_STATUS_FILE, status)
+    print("[GAME] ベースライン取得モード終了")
+    return jsonify({"status": "ok", "mode": "normal"})
+
 
 @app.route('/speed.html')
 def serve_speed():

@@ -10,7 +10,7 @@ heart_api = Blueprint('heart_api', __name__)
 reset_api = Blueprint('reset_api', __name__)
 
 file_lock = threading.Lock()
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_FILE = os.path.join(BASE_DIR, 'heart_rates.json')
 HISTORY_FILE = os.path.join(BASE_DIR, 'heart_history.json')
 TURN_FILE = os.path.join(BASE_DIR, 'turn.json')
@@ -24,6 +24,10 @@ latest_heartbeats = {}
 def is_game_running():
     status = load_json_file(GAME_FILE)
     return status.get("running", False)  # ← ここは実際のキー名に合わせる
+
+def is_collecting_baseline():
+    status = load_json_file(GAME_FILE)
+    return status.get("baseline_mode", False)
 
 
 file_lock = threading.Lock()
@@ -49,8 +53,10 @@ def save_json_file(filename, data):
 @heart_api.route('/heart', methods=['POST'])
 def post_heart():
     try:
-        if not is_game_running():
-            return jsonify({"status": "error", "message": "取得開始されていません"}), 403
+        game = load_json_file(GAME_FILE)
+
+        if not game.get("running", False) and not game.get("baseline_mode", False):
+            return jsonify({"status":"error","message":"取得開始されていません"}),403
 
         data = request.get_json(force=True)
         device_id = data.get('device_id')
@@ -95,22 +101,27 @@ def post_heart():
 # ----------------------------------------
 def auto_fill_thread():
     while True:
-        time.sleep(1)  # 1秒ごとにチェック
+        time.sleep(1)
         now = int(time.time() * 1000)
 
-        if not is_game_running():
-            continue  # ← ゲーム中でなければ補完保存しない
+        game = load_json_file(GAME_FILE)
+
+        running = game.get("running", False)
+        baseline = game.get("baseline_mode", False)
+
+        # ❗ゲーム中 or baseline取得中以外は補完しないだけ
+        if not running and not baseline:
+            continue
 
         for device_id, last_ts in latest_timestamps.items():
             diff = now - last_ts
 
-            # 1秒以上新しいPOSTが無い → 補完
             if diff >= 1000:
                 heartbeat = latest_heartbeats.get(device_id)
                 if heartbeat is None:
                     continue
 
-                fake_ts = last_ts + 1000
+                fake_ts = now
 
                 data_file = load_json_file(DATA_FILE)
                 data_file.setdefault(device_id, []).append({
@@ -119,12 +130,9 @@ def auto_fill_thread():
                 })
                 save_json_file(DATA_FILE, data_file)
 
-                print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}, timestamp={fake_ts}")
-
-                # 最新時刻を補完時刻に更新（連続補完しすぎないため）
                 latest_timestamps[device_id] = fake_ts
 
-
+                print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}")
 # スレッド起動（アプリ起動時に1回だけ実行）
 threading.Thread(target=auto_fill_thread, daemon=True).start()
 
@@ -200,4 +208,21 @@ def heartbeat_complement_worker():
                 readable = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(new_timestamp / 1000))
                 print(f"[{readable}] 🟡 補完: device={device_id}, BPM={last_entry['heartbeat']}, timestamp={new_timestamp}")
 
-    
+@heart_api.route('/get_baselines', methods=['GET'])
+def get_baselines():
+    baseline = load_json_file('baseline.json')
+    return jsonify(baseline)
+
+@heart_api.route('/start_baseline', methods=['POST'])
+def start_baseline():
+    status = load_json_file(GAME_FILE)
+    status["baseline_mode"] = True
+    save_json_file(GAME_FILE, status)
+    return jsonify({"status": "ok"})
+
+@heart_api.route('/stop_baseline', methods=['POST'])
+def stop_baseline():
+    status = load_json_file(GAME_FILE)
+    status["baseline_mode"] = False
+    save_json_file(GAME_FILE, status)
+    return jsonify({"status": "ok"})

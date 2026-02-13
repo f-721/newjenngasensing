@@ -169,6 +169,7 @@ async function startGame() {
     const data = await res.json();
     if (res.ok) {
       alert("ゲームを開始しました");
+      isGameRunning = true;   // ← ★★★ これ追加 ★★★
       refreshGameStatus();
       setupGraphs();
       startPlotting();
@@ -223,26 +224,72 @@ async function stopGame() {
       }
     }
 
+let baselineTimers = {};  // watchごとのタイマー管理
+let baselineIntervals = {};
+
 async function calculateBaseline() {
-  const selectedId = document.getElementById("turnSelector").value;
+
+  const selectedId = document.getElementById("baselineSelector").value;
   if (!selectedId) return alert("デバイスIDが選択されていません");
 
+  const resultEl = document.getElementById("baseline-result");
+
+  // 既に進行中ならキャンセル
+  if (baselineTimers[selectedId]) {
+    clearTimeout(baselineTimers[selectedId]);
+    clearInterval(baselineIntervals[selectedId]);
+  }
+
   try {
-    const res = await fetch(`/calculate_baseline/${selectedId}`, {
-      method: "POST"
-    });
-    const data = await res.json();
-    if (res.ok) {
-      alert(`平均BPM: ${data.average}`);
-    } else {
-      alert(data.message || "平均取得に失敗しました");
-    }
-  } catch (err) {
-    console.error("平均取得エラー", err);
-    alert("通信エラーが発生しました");
+
+    await fetch("/start_baseline",{method:"POST"});
+
+    // watchの次POSTを待つ（超重要）
+    await new Promise(r => setTimeout(r,1000));
+
+    let countdown = 10;
+
+    baselineIntervals[selectedId] = setInterval(() => {
+      countdown--;
+      resultEl.innerText = `${selectedId} の平均値取得中... (${countdown}秒)`;
+      console.log("心拍数取得中...");
+    }, 1000);
+
+    // 🔴② 10秒待機（この間に保存される）
+    baselineTimers[selectedId] = setTimeout(async () => {
+
+      clearInterval(baselineIntervals[selectedId]);
+
+      // 🔴③ 平均計算
+      const res = await fetch(`/calculate_baseline/${selectedId}`,{
+        method:"POST"
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        resultEl.innerText =
+          `${selectedId} の平均値：${Math.round(data.average)} BPM`;
+      } else {
+        resultEl.innerText =
+      `${selectedId} の平均値取得に失敗：${data.message || data.error || 'エラー'}`;
+      }
+
+      // 🔴④ baselineモードOFF（忘れるとゲーム始まらん）
+      await fetch("/stop_baseline",{method:"POST"});
+
+      delete baselineTimers[selectedId];
+      delete baselineIntervals[selectedId];
+
+    }, 10000);
+
+  } catch(err){
+    console.error(err);
+    resultEl.innerText = "baseline取得エラー";
   }
 }
-    async function refreshCurrentTurn() {
+
+async function refreshCurrentTurn() {
       try {
         const res = await fetch('/turn');
         const data = await res.json();
@@ -360,6 +407,23 @@ window.onload = async () => {
     document.getElementById('status').innerText = '状態: 停止';
   }
 
+window.addEventListener("load", async () => {
+
+    const res = await fetch("/get_baselines");
+    const data = await res.json();
+
+    for (const device in data) {
+
+        const avg = Math.round(data[device]);
+
+        const elem = document.getElementById(`baseline-${device}`);
+
+        if (elem) {
+            elem.innerText = `${device} の平均値: ${avg} BPM`;
+        }
+    }
+});
+
   await refreshGameStatus();
   await refreshCurrentTurn();
   await refreshClientList();
@@ -376,6 +440,7 @@ window.onload = async () => {
   } catch (e) {
     console.error("ゲーム状態取得失敗", e);
   }
+  await restoreBaselineStatus();
 };
 
 document.addEventListener("visibilitychange", () => {
@@ -475,7 +540,7 @@ scales: {
     }
   }
 },
-  y: {
+    y: {
     min: 60,
     max: 120,
     title: {
@@ -607,8 +672,6 @@ document.getElementById("baseline-result").innerText = `平均BPM: ${data.averag
     <button onclick="setTurn()">この人のターンにする</button>
     <button onclick="nextTurn()" style="font-size: 1.5em; margin-top: 10px;">ターンエンド</button>
     <hr>
-    <!-- <button onclick="location.href='graph.html'" style="background-color: #673AB7;">心拍グラフを見る</button>
-    <hr> -->
     <button onclick="startFetching()">取得開始</button>
     <button class="stop-button" onclick="stopFetching()">取得停止</button>
     <br>

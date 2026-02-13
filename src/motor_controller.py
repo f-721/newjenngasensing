@@ -12,7 +12,7 @@ motorPins = (18, 23, 24, 25)
 stepsPerRevolution = 2048
 MIN_STEPSPEED = 0.003
 
-API_HOST = 'http://192.168.100.28:8080'
+API_HOST = 'http://192.168.100.26:8080'
 HEART_API_URL = f'{API_HOST}/heart'
 STATUS_API_URL = f'{API_HOST}/status'
 TURN_API_URL = f'{API_HOST}/turn'
