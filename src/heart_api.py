@@ -56,7 +56,7 @@ def post_heart():
         game = load_json_file(GAME_FILE)
 
         if not game.get("running", False) and not game.get("baseline_mode", False):
-            return jsonify({"status":"error","message":"取得開始されていません"}),403
+            print("[ALLOW] ゲーム停止中でもPOST許可")
 
         data = request.get_json(force=True)
         device_id = data.get('device_id')
@@ -133,6 +133,7 @@ def auto_fill_thread():
                 latest_timestamps[device_id] = fake_ts
 
                 print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}")
+                
 # スレッド起動（アプリ起動時に1回だけ実行）
 threading.Thread(target=auto_fill_thread, daemon=True).start()
 

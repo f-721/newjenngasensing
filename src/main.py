@@ -154,6 +154,7 @@ def set_turn():
     game_status = load_json_file(GAME_STATUS_FILE)
     if not game_status.get("running", False):
         return jsonify({"status": "error", "message": "ゲームを開始してください"}), 400
+# ゲーム状態チェック削除！！
     assigned_ids = load_json_file(ASSIGNED_FILE)
     if new_turn not in assigned_ids.values():
         return jsonify({"status": "error", "message": "指定されたIDが存在しません"}), 400
