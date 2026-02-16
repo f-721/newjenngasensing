@@ -27,6 +27,7 @@ ASSIGNED_FILE = 'assigned_ids.json'
 STATIC_FOLDER = 'static'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, '../heart_rates.json'))
+BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 
 
 # -------------------------
@@ -48,58 +49,43 @@ def load_json_file(filename):
                 return json.loads(content)
         return {}
 
-# -------------------------
-# APIエンドポイント
-# -------------------------
-# @app.route('/start', methods=['POST'])
-# def start_game():
-#     # ゲーム状態をファイルから読み込む
-#     game_status = load_json_file(GAME_STATUS_FILE)
-
-#     # フラグを更新して保存
-#     game_status["running"] = True
-#     game_status["game_over"] = False
-#     save_json_file(GAME_STATUS_FILE, game_status)
-
-#     # IDリストを読み込んで最初のターンをセット
-#     assigned_ids = load_json_file(ASSIGNED_FILE)
-#     if assigned_ids:
-#         all_ids = sorted(set(assigned_ids.values()))
-#         save_json_file(TURN_FILE, {"current_turn": all_ids[0]})
-#         print(f"[API] ゲーム開始。最初のターン: {all_ids[0]}")
-#     else:
-#         save_json_file(TURN_FILE, {"current_turn": None})
-#         print("[API] ゲーム開始。しかし割り当てIDが存在しません")
-
-#     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
 
 @app.route('/start', methods=['POST'])
 def start_game():
-    assigned_ids = load_json_file(ASSIGNED_FILE)
-    baseline_data = load_json_file("baseline_heart_rates.json")
 
-    missing = []
-    for ip, device_id in assigned_ids.items():
-        if device_id not in baseline_data:
-            missing.append(device_id)
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    baseline_data = load_json_file("baseline.json")
+
+    assigned_watch_ids = set(assigned_ids.values())
+    baseline_watch_ids = set(baseline_data.keys())
+
+    print("[DEBUG] assigned:", assigned_watch_ids)
+    print("[DEBUG] baseline:", baseline_watch_ids)
+
+    # 🔴 baseline未取得watchチェック
+    missing = assigned_watch_ids - baseline_watch_ids
 
     if missing:
         return jsonify({
             "status": "error",
-            "message": f"以下のwatchの平均値データがありません: {', '.join(missing)}"
+            "message": f"以下のwatchの平均値が未取得: {', '.join(missing)}"
         }), 400
 
-    # 通常の開始処理
+    # 🟢 baseline揃ったので開始OK
     game_status = load_json_file(GAME_STATUS_FILE)
     game_status["running"] = True
     game_status["game_over"] = False
     save_json_file(GAME_STATUS_FILE, game_status)
 
-    # ターン設定
-    ids = sorted(set(assigned_ids.values()))
-    save_json_file(TURN_FILE, {"current_turn": ids[0] if ids else None})
+    # ターン初期化
+    ids = sorted(assigned_watch_ids)
+    save_json_file(TURN_FILE, {
+        "current_turn": ids[0] if ids else None
+    })
 
-    return jsonify({"status": "ok", "message": "ゲームを開始しました"})
+    print("[GAME START] baseline一致 → 開始")
+
+    return jsonify({"status": "ok"})
 
 @app.route('/stop', methods=['POST'])
 def stop_game():
@@ -351,7 +337,7 @@ def start_baseline():
 @app.route('/calculate_baseline/<device_id>', methods=['POST'])
 def calculate_baseline(device_id):
 
-    time.sleep(1.2)  # ← 補完が1回入るのを待つ
+    time.sleep(1.2)
 
     data_file = load_json_file(DATA_FILE)
     records = data_file.get(device_id, [])
@@ -371,6 +357,12 @@ def calculate_baseline(device_id):
     avg = sum(recent) / len(recent)
 
     print(f"[BASELINE OK] {device_id} avg={avg} samples={len(recent)}")
+
+    # 🔴🔴🔴ここが最重要🔴🔴🔴
+    baseline = load_json_file(BASELINE_FILE)
+    baseline[device_id] = avg
+    save_json_file(BASELINE_FILE, baseline)
+    print(f"[BASELINE SAVE] {device_id} -> {avg}")
 
     return jsonify({"average":avg})
 
