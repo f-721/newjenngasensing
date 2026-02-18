@@ -1,4 +1,1 @@
-{
-  "running": false,
-  "game_over": true
-}
+{"running": true, "game_over": false, "baseline_mode": false}

@@ -26,7 +26,7 @@ TURN_FILE = 'turn.json'
 ASSIGNED_FILE = 'assigned_ids.json'
 STATIC_FOLDER = 'static'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, '../heart_rates.json'))
+DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, 'heart_rates.json'))
 BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 
 
@@ -190,7 +190,7 @@ def export_csv():
         return jsonify({"status": "error", "message": "ゲーム終了後のみCSV保存可能です"}), 403
 
     # 保存するデータを読み込み
-    data = load_json_file("heart_rates.json")  # ← ここが保存対象のJSON
+    data = load_json_file(DATA_FILE)  # ← ここが保存対象のJSON
 
     # ファイル名生成と保存先フォルダ
     timestamp = int(time.time())

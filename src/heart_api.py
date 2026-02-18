@@ -10,7 +10,7 @@ heart_api = Blueprint('heart_api', __name__)
 reset_api = Blueprint('reset_api', __name__)
 
 file_lock = threading.Lock()
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'heart_rates.json')
 HISTORY_FILE = os.path.join(BASE_DIR, 'heart_history.json')
 TURN_FILE = os.path.join(BASE_DIR, 'turn.json')
