@@ -3,7 +3,6 @@ from time import sleep
 import time
 import requests
 import threading
-import random
 
 # --------------------
 # 設定
@@ -13,13 +12,21 @@ stepsPerRevolution = 2048
 MIN_STEPSPEED = 0.003
 
 API_HOST = 'http://192.168.100.26:8080'
-HEART_API_URL = f'{API_HOST}/heart'
+HEART_API_URL = f'{API_HOST}/heart_all'  # ★全watchの心拍を取得するAPI
 STATUS_API_URL = f'{API_HOST}/status'
 TURN_API_URL = f'{API_HOST}/turn'
+BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 
-device_direction = {}
 rotation_settings = {}
 rotation_settings_lock = threading.Lock()
+# モード
+# self = 自分
+# next = 次の人
+control_mode = "self"
+
+# baseline キャッシュ（watchごとの平均値）
+baseline_cache = {}
+baseline_lock = threading.Lock()
 
 # --------------------
 # GPIOセットアップ
@@ -42,27 +49,34 @@ def rotary(direction, stepSpeed):
                 else:
                     GPIO.output(motorPins[i], (0x99 << j) & (0x80 >> i))
             sleep(stepSpeed)
-# ここで速度の調整を行います
-# def calculate_rpm(bpm):
-#     if bpm <= 70:
-#         return 0  # 動かない
-#     elif bpm <= 75:
-#         return 10
-#     elif bpm <= 85:
-#         return 15
-#     else:
-#         return 20
 
-def calculate_rpm(bpm, baseline_bpm):
-    diff = bpm - baseline_bpm
-    if diff < 5:
-        return 0  # 小さな変化は無視
-    elif diff < 10:
+# --------------------
+# diff → RPM & 方向
+# --------------------
+def calculate_rpm(diff):
+    """
+    diff = bpm - baseline
+    """
+    ad = abs(diff)
+
+    if ad < 3:
+        return 0
+    elif ad < 8:
         return 10
-    elif diff < 20:
+    elif ad < 15:
         return 20
     else:
         return 30
+
+def calculate_direction(diff):
+    """
+    baselineより上なら 'c'
+    baselineより下なら 'a'
+    """
+    if diff >= 0:
+        return 'c'
+    else:
+        return 'a'
 
 # --------------------
 # API通信
@@ -94,22 +108,97 @@ def get_heart_data():
         print("[ERROR] /heart取得失敗:", e)
         return {}
 
+def fetch_baselines():
+    """
+    baseline.json をサーバから取得してキャッシュ更新
+    """
+    try:
+        res = requests.get(BASELINE_API_URL, timeout=2)
+        res.raise_for_status()
+        data = res.json()  # {"watch1": 68.2, ...}
+
+        # 数値化して保存
+        parsed = {}
+        for k, v in data.items():
+            try:
+                parsed[k] = float(v)
+            except:
+                pass
+
+        with baseline_lock:
+            baseline_cache.clear()
+            baseline_cache.update(parsed)
+
+        # print("[BASELINE] updated:", baseline_cache)
+    except Exception as e:
+        # 失敗しても前のキャッシュで動かす
+        print("[WARN] baseline取得失敗（キャッシュ継続）:", e)
+
+def get_control_mode():
+    try:
+        res = requests.get(f"{API_HOST}/get_control_mode", timeout=2)
+        res.raise_for_status()
+        return res.json().get("mode","self")
+    except:
+        return "self"
+
+# --------------------
+# 次のwatch取得
+# --------------------
+def get_watch_ids():
+    try:
+        res = requests.get(f"{API_HOST}/clients", timeout=2)
+        res.raise_for_status()
+        data = res.json()
+
+        ids = list(data.get("ids", {}).values())
+        ids = sorted(set(ids))  # ["watch1","watch2"...]
+        return ids
+    except Exception as e:
+        print("[ERROR] /clients取得失敗:", e)
+        return []
+
+def get_next_watch(current_turn):
+    ids = get_watch_ids()
+
+    if not current_turn or current_turn not in ids:
+        return None
+
+    i = ids.index(current_turn)
+    return ids[(i + 1) % len(ids)]
+
 # --------------------
 # データ取得スレッド
 # --------------------
 def data_fetch_loop():
+    last_turn = None
+    last_info = 0
+
     while True:
         try:
             running = get_game_status()
             if not running:
                 with rotation_settings_lock:
                     rotation_settings.clear()
-                print("[INFO] Game stopped. Motors paused.")
+
+                # ★追加：2秒に1回だけ表示（うるさくしない）
+                if time.time() - last_info > 2:
+                    print("[WAIT] game running=false なので待機中…（UIでゲーム開始してね）")
+                    last_info = time.time()
+
                 time.sleep(1)
                 continue
 
+            # baseline更新（毎秒でOK、重いなら2～3秒にしても良い）
+            fetch_baselines()
+
             current_turn = get_current_turn()
             heart_data = get_heart_data()
+
+            # ターン変化ログ
+            if current_turn != last_turn:
+                print(f"[TURN] {last_turn} -> {current_turn}")
+                last_turn = current_turn
 
             if not current_turn or current_turn not in heart_data:
                 with rotation_settings_lock:
@@ -117,22 +206,48 @@ def data_fetch_loop():
                 time.sleep(1)
                 continue
 
-            # ターン中の人のデータだけ更新
-            record = heart_data.get(current_turn)
+            mode = get_control_mode()
+
+            # 参照する心拍のwatchを決める
+            if mode == "next":
+                target_watch = get_next_watch(current_turn)
+            else:
+                target_watch = current_turn
+
+            if not target_watch or target_watch not in heart_data:
+                with rotation_settings_lock:
+                    rotation_settings.clear()
+                time.sleep(1)
+                continue
+
+            record = heart_data.get(target_watch, {})
             try:
-                bpm = int(record.get("heartbeat", 0))
+                bpm = float(record.get("heartbeat", 0))
             except (ValueError, TypeError):
                 bpm = 0
 
-            if bpm > 0:
-                rpm = calculate_rpm(bpm)
+            # baselineは「参照する心拍のwatch」に合わせる（★重要）
+            with baseline_lock:
+                baseline = baseline_cache.get(target_watch)
+
+            if baseline is None:
+                print(f"[WARN] baseline無し: target={target_watch} （モーター停止）")
                 with rotation_settings_lock:
                     rotation_settings.clear()
-                    rotation_settings[current_turn] = rpm
-                print(f"[心拍受信] {current_turn}: {bpm} bpm -> RPM: {rpm}")
-            else:
-                with rotation_settings_lock:
-                    rotation_settings.clear()
+                time.sleep(1)
+                continue
+
+            diff = bpm - baseline
+            rpm = calculate_rpm(diff)
+            direction = calculate_direction(diff)
+
+            # ★回転させる対象は「今ターンの人」（プレイ中の人）
+            with rotation_settings_lock:
+                rotation_settings.clear()
+                if rpm > 0:
+                    rotation_settings[current_turn] = (rpm, direction)
+
+            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, diff={diff:+.1f} -> rpm={rpm}, dir={direction}")
 
             time.sleep(1)
 
@@ -140,114 +255,36 @@ def data_fetch_loop():
             print("[ERROR] Data fetch error:", e)
             time.sleep(1)
 
+# --------------------
+# 回転ループ
+# --------------------
 def rotation_loop():
-    last_update_time = 0  # 前回更新時刻
-
     while True:
         try:
-            current_time = time.time()
-
-            # 1秒ごとに回転設定を更新（directionやrpm）
-            if current_time - last_update_time >= 1:
-                with rotation_settings_lock:
-                    items = list(rotation_settings.items())
-                last_update_time = current_time
-
-                # 回転設定がない場合
-                if not items:
-                    time.sleep(0.05)
-                    continue
-
-                for device_id, rpm in items:
-                    if device_id not in device_direction:
-                        device_direction[device_id] = 'c'
-                        print(f"[回転] {device_id} 初期方向 -> c")
-                    else:
-                        if random.random() < 0.5:
-                            prev = device_direction[device_id]
-                            device_direction[device_id] = 'a' if prev == 'c' else 'c'
-                            print(f"[方向変更] {device_id} により回転方向が {prev} → {device_direction[device_id]} に変更")
-
-                    direction = device_direction[device_id]
-                    stepSpeed = (60 / rpm) / stepsPerRevolution
-                    safe_stepSpeed = max(stepSpeed * 4, MIN_STEPSPEED)
-
-                    print(f"[回転設定更新] {device_id} -> 方向: {direction}, RPM: {rpm}, StepSpeed: {safe_stepSpeed:.5f}")
-
-            # 直前の回転設定に従って回す（常に回す）
             with rotation_settings_lock:
                 items = list(rotation_settings.items())
 
-            for device_id, rpm in items:
-                direction = device_direction.get(device_id, 'c')
+            if not items:
+                # これがずっと出るなら「rotation_settingsが空」
+                # → data_fetch_loop側が毎回clearしてる/ターン不一致/heart_data欠落 など
+                # print("[ROT] no items")
+                time.sleep(0.05)
+                continue
+
+            print("[ROT] items:", items)  # ★これ追加
+
+            for device_id, (rpm, direction) in items:
                 stepSpeed = (60 / rpm) / stepsPerRevolution
                 safe_stepSpeed = max(stepSpeed * 4, MIN_STEPSPEED)
-
+                print(f"[ROT] run {device_id} rpm={rpm} dir={direction} step={safe_stepSpeed:.5f}")  # ★これ追加
                 rotary(direction, safe_stepSpeed)
 
         except KeyboardInterrupt:
-            print("[STOP] KeyboardInterrupt detected. Cleaning up GPIO...")
             GPIO.cleanup()
             break
         except Exception as e:
             print("[ERROR] Rotation error:", e)
             time.sleep(0.1)
-# --------------------
-# 回転スレッド（1回だけ定義）
-# --------------------
-def rotation_loop():
-    last_update_time = 0  # 前回更新時刻
-
-    while True:
-        try:
-            current_time = time.time()
-
-            # 1秒ごとに回転設定を更新（directionやrpm）
-            if current_time - last_update_time >= 1:
-                with rotation_settings_lock:
-                    items = list(rotation_settings.items())
-                last_update_time = current_time
-
-                # 回転設定がない場合
-                if not items:
-                    time.sleep(0.05)
-                    continue
-
-                for device_id, rpm in items:
-                    if device_id not in device_direction:
-                        device_direction[device_id] = 'c'
-                        print(f"[回転] {device_id} 初期方向 -> c")
-                    else:
-                        if random.random() < 0.5:
-                            prev = device_direction[device_id]
-                            device_direction[device_id] = 'a' if prev == 'c' else 'c'
-                            print(f"[方向変更] {device_id} の方向が {prev} → {device_direction[device_id]} に変更")
-
-                    direction = device_direction[device_id]
-                    stepSpeed = (60 / rpm) / stepsPerRevolution
-                    safe_stepSpeed = max(stepSpeed * 4, MIN_STEPSPEED)
-
-                    print(f"[回転設定更新] {device_id} -> 方向: {direction}, RPM: {rpm}, StepSpeed: {safe_stepSpeed:.5f}")
-
-            # 直前の回転設定に従って回す（常に回す）
-            with rotation_settings_lock:
-                items = list(rotation_settings.items())
-
-            for device_id, rpm in items:
-                direction = device_direction.get(device_id, 'c')
-                stepSpeed = (60 / rpm) / stepsPerRevolution
-                safe_stepSpeed = max(stepSpeed * 4, MIN_STEPSPEED)
-
-                rotary(direction, safe_stepSpeed)
-
-        except KeyboardInterrupt:
-            print("[STOP] KeyboardInterrupt detected. Cleaning up GPIO...")
-            GPIO.cleanup()
-            break
-        except Exception as e:
-            print("[ERROR] Rotation error:", e)
-            time.sleep(0.1)
-
 # --------------------
 # MAIN
 # --------------------

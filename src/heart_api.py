@@ -139,9 +139,38 @@ threading.Thread(target=auto_fill_thread, daemon=True).start()
 
 @heart_api.route('/heart', methods=['GET'])
 def get_latest_heart_rates():
+    try:
+        heart_data = load_json_file(DATA_FILE) or {}
+        turn = load_json_file(TURN_FILE) or {}
+        current_turn = turn.get("current_turn")
+
+        print(f"[API] 現在のターン取得 -> {current_turn}")
+
+        result = {}
+
+        for device_id, records in heart_data.items():
+            if not records:
+                continue
+            latest = records[-1]
+
+            # ターンが未設定なら全員返す / ターン中ならその人だけ返す
+            if current_turn is None or current_turn == device_id:
+                result[device_id] = latest
+
+        return jsonify(result)  # ✅ 絶対returnする
+
+    except Exception as e:
+        print("[ERROR] GET /heart failed:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500  # ✅ ここもreturn
+        
+@heart_api.route('/heart_all', methods=['GET'])
+def get_latest_heart_rates_all():
     heart_data = load_json_file(DATA_FILE)
-    turn = load_json_file(TURN_FILE)
-    current_turn = turn.get("current_turn")
+    result = {}
+    for device_id, records in heart_data.items():
+        if records:
+            result[device_id] = records[-1]
+    return jsonify(result)
 
     print(f"[API] 現在のターン取得 -> {current_turn}")
     # print(f"[API] heart_data -> {heart_data}")

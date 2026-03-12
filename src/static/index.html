@@ -100,7 +100,7 @@
 
     async function fetchHeartRate() {
       try {
-        const res = await fetch('/heart');
+        const res = await fetch('/heart_all');
         const text = await res.text();
         let data = {};
         try {
@@ -650,6 +650,41 @@ function updateChart(watchId, heartbeat, timestamp) {
 }
 document.getElementById("baseline-result").innerText = `平均BPM: ${data.average}（${selectedId}）`;
 
+function setMode(mode){
+
+    fetch("/clients")
+    .then(res => res.json())
+    .then(data => {
+
+        const count = data.count;
+
+        // NEXTモードは2台以上必要
+        if(mode === "next" && count <= 1){
+            alert("NEXTモードは2台以上接続されていないと使用できません！");
+            return;
+        }
+
+        // モード変更
+        fetch("/set_control_mode",{
+            method:"POST",
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({mode:mode})
+        })
+        .then(res => res.json())
+        .then(data => {
+
+            if(mode === "self"){
+                alert("自分の心拍モードに変更しました");
+            }
+
+            if(mode === "next"){
+                alert("次の人の心拍モードに変更しました");
+            }
+
+        });
+
+    });
+}
   </script>
 </head>
 <body>
@@ -677,6 +712,9 @@ document.getElementById("baseline-result").innerText = `平均BPM: ${data.averag
     <br>
     <select id="baselineSelector"></select>
     <button onclick="calculateBaseline()">平均取得</button>
+    <hr>
+    <button onclick="setMode('self')">SELF ver.</button>
+    <button onclick="setMode('next')">NEXT ver.</button>
     <hr>
     <button onclick="startGame()">ゲーム開始</button>
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>

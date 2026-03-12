@@ -28,6 +28,7 @@ STATIC_FOLDER = 'static'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, 'heart_rates.json'))
 BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
+CONTROL_FILE = "control_mode.json"
 
 
 # -------------------------
@@ -52,23 +53,47 @@ def load_json_file(filename):
 
 @app.route('/start', methods=['POST'])
 def start_game():
-
-    assigned_ids = load_json_file(ASSIGNED_FILE)
-    baseline_data = load_json_file("baseline.json")
+    assigned_ids = load_json_file(ASSIGNED_FILE)      # {"ip":"watch1", ...}
+    baseline_data = load_json_file(BASELINE_FILE)     # {"watch1": 68.2, ...}
 
     assigned_watch_ids = set(assigned_ids.values())
-    baseline_watch_ids = set(baseline_data.keys())
 
-    print("[DEBUG] assigned:", assigned_watch_ids)
-    print("[DEBUG] baseline:", baseline_watch_ids)
-
-    # 🔴 baseline未取得watchチェック
-    missing = assigned_watch_ids - baseline_watch_ids
-
-    if missing:
+    # ✅ 1) そもそもwatchが認識できてないなら開始させない
+    if not assigned_watch_ids:
         return jsonify({
             "status": "error",
-            "message": f"以下のwatchの平均値が未取得: {', '.join(missing)}"
+            "message": "watch側にて再接続を行なってください（接続watchが認識できていません）"
+        }), 400
+
+    # ✅ 2) baselineの値が数値かチェックしつつ、baseline側のwatch集合を作る
+    baseline_watch_ids = set()
+    bad = []
+    for wid, v in baseline_data.items():
+        try:
+            float(v)
+            baseline_watch_ids.add(wid)
+        except:
+            bad.append(wid)
+
+    if bad:
+        return jsonify({
+            "status": "error",
+            "message": f"baseline.jsonの値が数値でないwatchがあります: {', '.join(bad)}"
+        }), 400
+
+    # ✅ 3) 「不足」も「余分」も許さず、完全一致でないと開始不可
+    missing = assigned_watch_ids - baseline_watch_ids
+    extra   = baseline_watch_ids - assigned_watch_ids
+
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append("未取得: " + ", ".join(sorted(missing)))
+        if extra:
+            parts.append("余計に入ってる: " + ", ".join(sorted(extra)))
+        return jsonify({
+            "status": "error",
+            "message": "baselineが揃っていません（接続watchと一致しません）: " + " / ".join(parts)
         }), 400
 
     # 🟢 baseline揃ったので開始OK
@@ -79,13 +104,10 @@ def start_game():
 
     # ターン初期化
     ids = sorted(assigned_watch_ids)
-    save_json_file(TURN_FILE, {
-        "current_turn": ids[0] if ids else None
-    })
+    save_json_file(TURN_FILE, {"current_turn": ids[0] if ids else None})
 
-    print("[GAME START] baseline一致 → 開始")
-
-    return jsonify({"status": "ok"})
+    print("[GAME START] baseline完全一致 → 開始")
+    return jsonify({"status": "ok", "message": "ゲームを開始しました"})
 
 @app.route('/stop', methods=['POST'])
 def stop_game():
@@ -116,13 +138,22 @@ def get_game_status():
 @app.route('/reset', methods=['POST'])
 def reset_server():
     save_json_file(DATA_FILE, {})
-    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False})
+    save_json_file(GAME_STATUS_FILE, {
+        "running": False,
+        "game_over": False,
+        "baseline_mode": False
+    })
     save_json_file(TURN_FILE, {"current_turn": None})
     save_json_file(ASSIGNED_FILE, {})
-    save_json_file("baseline_heart_rates.json", {})  # ← これ追加！
 
-    print("[API] サーバーデータを初期化しました（ID割り当てもリセット）")
-    return jsonify({"status": "ok", "message": "サーバーを完全リセットしました"})
+    # 🔴 ここが最重要
+    save_json_file(BASELINE_FILE, {})   # baseline.json を空にする
+
+    print("[API] サーバーデータを完全初期化しました")
+    return jsonify({
+        "status": "ok",
+        "message": "サーバーを完全リセットしました"
+    })
 
 @app.route("/assign_id")
 def assign_id():
@@ -143,7 +174,11 @@ def assign_id():
 
 @app.route("/clients")
 def get_clients():
-    return jsonify({"count": len(clients), "ids": clients})
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    return jsonify({
+        "count": len(assigned_ids),
+        "ids": assigned_ids
+    })
 
 @app.route('/set_turn', methods=['POST'])
 def set_turn():
@@ -214,6 +249,35 @@ def export_csv():
 
     # クライアントにファイル送信（ダウンロード）
     return send_file(filepath, as_attachment=True, download_name="heart_rate_data.csv")
+
+@app.route("/get_control_mode")
+def get_control_mode():
+    if os.path.exists(CONTROL_FILE):
+        with open(CONTROL_FILE) as f:
+            return jsonify(json.load(f))
+    return jsonify({"mode":"self"})
+
+@app.route("/set_control_mode", methods=["POST"])
+def set_control_mode():
+    data = request.get_json()
+    mode = data.get("mode", "self")
+
+    # NEXTは2台以上必要
+    if mode == "next":
+        assigned_ids = load_json_file(ASSIGNED_FILE)
+        watch_ids = set(assigned_ids.values())
+
+        if len(watch_ids) < 2:
+            return jsonify({
+                "status": "error",
+                "message": "NEXTモードは2台以上接続されていないと使用できません"
+            }), 400
+
+    with open(CONTROL_FILE, "w") as f:
+        json.dump({"mode": mode}, f)
+
+    print("[CONTROL MODE]", mode)
+    return jsonify({"status": "ok"})
     
 @app.route('/get_heart_data', methods=['GET'])
 def get_heart_data():
