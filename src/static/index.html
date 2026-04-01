@@ -100,7 +100,7 @@
 
     async function fetchHeartRate() {
       try {
-        const res = await fetch('/heart_all');
+        const res = await fetch('/heart');
         const text = await res.text();
         let data = {};
         try {
@@ -268,9 +268,9 @@ async function calculateBaseline() {
       const data = await res.json();
 
       if (res.ok) {
-        resultEl.innerText =
-          `${selectedId} の平均値：${Math.round(data.average)} BPM`;
-      } else {
+        resultEl.innerText = `${selectedId} の平均値取得完了`;
+        updateBaselineUI(selectedId, data.average);
+      }else {
         resultEl.innerText =
       `${selectedId} の平均値取得に失敗：${data.message || data.error || 'エラー'}`;
       }
@@ -333,6 +333,34 @@ async function refreshClientList() {
   } catch (e) {
     console.error(e);
     document.getElementById('watch-count').innerText = '接続中のデバイス数: 取得失敗';
+  }
+}
+
+function updateBaselineUI(device_id, avg) {
+  let elem = document.getElementById(`baseline-${device_id}`);
+
+  if (!elem) {
+    elem = document.createElement("div");
+    elem.id = `baseline-${device_id}`;
+    document.getElementById("baseline-area").appendChild(elem);
+  }
+
+  elem.innerText = `${device_id} の平均値：${Math.round(avg)} BPM`;
+}
+
+async function loadBaselineToUI() {
+  try {
+    const res = await fetch("/get_baselines");
+    const data = await res.json();
+
+    const area = document.getElementById("baseline-area");
+    area.innerHTML = "";
+
+    for (const device_id in data) {
+      updateBaselineUI(device_id, data[device_id]);
+    }
+  } catch (e) {
+    console.error("baseline復元失敗", e);
   }
 }
 
@@ -428,6 +456,7 @@ window.addEventListener("load", async () => {
   await refreshCurrentTurn();
   await refreshClientList();
   await setupGraphs();
+  await loadBaselineToUI();
 
   // 🔁 状態を取得して、ゲーム中ならグラフ描画も再開
   try {
@@ -694,6 +723,7 @@ function setMode(mode){
   <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
   <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
   <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="baseline-area" style="font-weight:bold; color:#333; margin-top:10px;"></div>
   <div id="baseline-result" style="font-weight:bold; color:#333; margin-top:10px;"></div>
 
   <div class="flex-container">
