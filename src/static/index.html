@@ -68,6 +68,93 @@
     min-width: 300px;
   }
 
+.mode-group {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 10px;
+}
+
+.self-group {
+  background: #e8f5e9;
+  border: 2px solid #66bb6a;
+}
+
+.other-group {
+  background: #e3f2fd;
+  border: 2px solid #42a5f5;
+}
+
+.mode-group-title {
+  font-weight: bold;
+  margin-bottom: 10px;
+  font-size: 1.05em;
+}
+
+.mode-btn {
+  margin: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.self-btn {
+  background-color: #43a047;
+}
+
+.self-btn:hover {
+  background-color: #388e3c;
+}
+
+.other-btn {
+  background-color: #1e88e5;
+}
+
+.other-btn:hover {
+  background-color: #1565c0;
+}
+
+.mode-btn:disabled {
+  background-color: #bdbdbd !important;
+  cursor: not-allowed;
+}
+
+.mode-note {
+  margin-top: 8px;
+  font-size: 0.95em;
+  color: #555;
+}
+
+.mode-banner {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #333;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-weight: bold;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 9999;
+}
+
+.mode-banner.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.mode-current {
+  margin-top: 10px;
+  font-weight: bold;
+  color: #333;
+  font-size: 1.1em;
+}
+
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
@@ -435,6 +522,10 @@ window.onload = async () => {
     document.getElementById('status').innerText = '状態: 停止';
   }
 
+await loadCurrentMode();
+await updateModeButtons();
+setInterval(updateModeButtons, 2000);
+
 window.addEventListener("load", async () => {
 
     const res = await fetch("/get_baselines");
@@ -714,22 +805,93 @@ function setMode(mode){
 
     });
 }
+
+function getModeLabel(mode) {
+  const modeNames = {
+    self_fast: "自分の心拍（差が大きいほど速い）",
+    self_slow: "自分の心拍（差が大きいほど遅い）",
+    next_fast: "他人の心拍（次の人）",
+    prev_fast: "他人の心拍（前の人）",
+    random_fast: "他人の心拍（ランダム）"
+  };
+  return modeNames[mode] || mode;
+}
+
+function showBanner(message) {
+  const banner = document.getElementById("mode-banner");
+  banner.textContent = message;
+  banner.classList.add("show");
+
+  setTimeout(() => {
+    banner.classList.remove("show");
+  }, 2000);
+}
+
+async function updateModeButtons() {
+  try {
+    const res = await fetch("/clients");
+    const data = await res.json();
+    const count = data.count || 0;
+
+    const otherButtons = document.querySelectorAll(".other-mode-btn");
+    const note = document.getElementById("other-mode-note");
+
+    const canUseOtherMode = count >= 2;
+
+    otherButtons.forEach(btn => {
+      btn.disabled = !canUseOtherMode;
+    });
+
+    if (canUseOtherMode) {
+      note.innerText = `接続台数: ${count}台 → 他人の心拍モード使用可`;
+    } else {
+      note.innerText = `接続台数: ${count}台 → 他人の心拍モードは2台以上で使用可能`;
+    }
+  } catch (e) {
+    console.error("接続台数取得失敗", e);
+  }
+}
+
+async function setMode(mode) {
+  try {
+    const res = await fetch("/set_control_mode", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ mode: mode })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      showBanner(data.message || "モード変更に失敗しました");
+      return;
+    }
+
+    const label = getModeLabel(mode);
+    document.getElementById("mode-current").innerText = `現在の設定：${label}`;
+    showBanner(`モード変更：${label}`);
+  } catch (e) {
+    console.error(e);
+    showBanner("モード変更通信エラー");
+  }
+}
+
+async function loadCurrentMode() {
+  try {
+    const res = await fetch("/get_control_mode");
+    const data = await res.json();
+    const label = getModeLabel(data.mode);
+    document.getElementById("mode-current").innerText = `現在の設定：${label}`;
+  } catch (e) {
+    console.error("現在モード取得失敗", e);
+  }
+}
   </script>
 </head>
 <body>
   <h1>心拍数モニター</h1>
-  <div id="turn-display-large"></div>
-  <div id="current-turn" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
-  <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="baseline-area" style="font-weight:bold; color:#333; margin-top:10px;"></div>
-  <div id="baseline-result" style="font-weight:bold; color:#333; margin-top:10px;"></div>
-
-  <div class="flex-container">
-    <div id="rate"><p>読み込み中...</p></div>
-    <div id="max-rate"><p>最大心拍数を記録中...</p></div>
-  </div>
 
   <div class="button-container">
     <h3>ターン操作</h3>
@@ -743,14 +905,53 @@ function setMode(mode){
     <select id="baselineSelector"></select>
     <button onclick="calculateBaseline()">平均取得</button>
     <hr>
-    <button onclick="setMode('self')">SELF ver.</button>
-    <button onclick="setMode('next')">NEXT ver.</button>
+<h3>モーター制御モード</h3>
+
+<div class="mode-group self-group">
+  <div class="mode-group-title">自分の心拍を使うモード</div>
+  <button class="mode-btn self-btn" onclick="setMode('self_fast')">
+    自分・差が大きいほど速い
+  </button>
+  <button class="mode-btn self-btn" onclick="setMode('self_slow')">
+    自分・差が大きいほど遅い
+  </button>
+</div>
+
+<div class="mode-group other-group">
+  <div class="mode-group-title">他人の心拍を使うモード</div>
+  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('next_fast')">
+    次の人の心拍
+  </button>
+  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('prev_fast')">
+    前の人の心拍
+  </button>
+  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('random_fast')">
+    ランダムな人の心拍
+  </button>
+  <div id="other-mode-note" class="mode-note"></div>
+</div>
+
+<div id="mode-banner" class="mode-banner"></div>
+<div id="mode-current" class="mode-current">現在の設定：未設定</div>
     <hr>
     <button onclick="startGame()">ゲーム開始</button>
     <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
     <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>
     <button onclick="exportCSV()" id="csvBtn" style="display: none; background-color: #9C27B0;">CSV保存</button>
     <br>
+<hr>
+      <div id="turn-display-large"></div>
+  <div id="current-turn" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
+  <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
+  <div id="baseline-area" style="font-weight:bold; color:#333; margin-top:10px;"></div>
+  <div id="baseline-result" style="font-weight:bold; color:#333; margin-top:10px;"></div>
+
+     <div class="flex-container">
+    <div id="rate"><p>読み込み中...</p></div>
+    <div id="max-rate"><p>最大心拍数を記録中...</p></div>
+  </div>
     <!-- <button id="reset-button">ID初期化</button> -->
      <h2>心拍数グラフ（30秒表示、リアルタイム更新）</h2>
   <div id="graph-area" class="graph-container"></div>

@@ -145,9 +145,8 @@ def reset_server():
     })
     save_json_file(TURN_FILE, {"current_turn": None})
     save_json_file(ASSIGNED_FILE, {})
-
-    # 🔴 ここが最重要
-    save_json_file(BASELINE_FILE, {})   # baseline.json を空にする
+    save_json_file(BASELINE_FILE, {})
+    save_json_file(CONTROL_FILE, {"mode": "self_fast"})
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -255,30 +254,47 @@ def get_control_mode():
     if os.path.exists(CONTROL_FILE):
         with open(CONTROL_FILE) as f:
             return jsonify(json.load(f))
-    return jsonify({"mode":"self"})
+    return jsonify({"mode": "self_fast"})
 
 @app.route("/set_control_mode", methods=["POST"])
 def set_control_mode():
     data = request.get_json()
-    mode = data.get("mode", "self")
+    mode = data.get("mode", "self_fast")
 
-    # NEXTは2台以上必要
-    if mode == "next":
-        assigned_ids = load_json_file(ASSIGNED_FILE)
-        watch_ids = set(assigned_ids.values())
+    allowed_modes = {
+        "self_fast",
+        "self_slow",
+        "next_fast",
+        "prev_fast",
+        "random_fast"
+    }
 
-        if len(watch_ids) < 2:
-            return jsonify({
-                "status": "error",
-                "message": "NEXTモードは2台以上接続されていないと使用できません"
-            }), 400
+    if mode not in allowed_modes:
+        return jsonify({
+            "status": "error",
+            "message": "無効なモードです"
+        }), 400
+
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    watch_ids = set(assigned_ids.values())
+
+    # 他人参照モードは2台以上必要
+    if mode in {"next_fast", "prev_fast", "random_fast"} and len(watch_ids) < 2:
+        return jsonify({
+            "status": "error",
+            "message": "このモードは2台以上接続されていないと使用できません"
+        }), 400
 
     with open(CONTROL_FILE, "w") as f:
         json.dump({"mode": mode}, f)
 
     print("[CONTROL MODE]", mode)
-    return jsonify({"status": "ok"})
-    
+    return jsonify({
+        "status": "ok",
+        "mode": mode,
+        "message": f"{mode} に変更しました"
+    })
+
 @app.route('/get_heart_data', methods=['GET'])
 def get_heart_data():
     try:

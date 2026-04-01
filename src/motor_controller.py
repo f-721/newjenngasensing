@@ -3,6 +3,7 @@ from time import sleep
 import time
 import requests
 import threading
+import random
 
 # --------------------
 # 設定
@@ -27,6 +28,10 @@ control_mode = "self"
 # baseline キャッシュ（watchごとの平均値）
 baseline_cache = {}
 baseline_lock = threading.Lock()
+
+# randomモード用：各ターンの参照先を固定する
+random_target_map = {}
+random_target_lock = threading.Lock()
 
 # --------------------
 # GPIOセットアップ
@@ -53,10 +58,7 @@ def rotary(direction, stepSpeed):
 # --------------------
 # diff → RPM & 方向
 # --------------------
-def calculate_rpm(diff):
-    """
-    diff = bpm - baseline
-    """
+def calculate_rpm_fast(diff):
     ad = abs(diff)
 
     if ad < 3:
@@ -67,6 +69,18 @@ def calculate_rpm(diff):
         return 20
     else:
         return 30
+
+def calculate_rpm_slow(diff):
+    ad = abs(diff)
+
+    if ad < 3:
+        return 30
+    elif ad < 8:
+        return 20
+    elif ad < 15:
+        return 10
+    else:
+        return 5
 
 def calculate_direction(diff):
     """
@@ -167,6 +181,38 @@ def get_next_watch(current_turn):
     i = ids.index(current_turn)
     return ids[(i + 1) % len(ids)]
 
+def get_prev_watch(current_turn):
+    ids = get_watch_ids()
+
+    if not current_turn or current_turn not in ids:
+        return None
+
+    i = ids.index(current_turn)
+    return ids[(i - 1) % len(ids)]
+
+def get_random_watch(current_turn):
+    ids = get_watch_ids()
+
+    if not current_turn or current_turn not in ids:
+        return None
+
+    others = [w for w in ids if w != current_turn]
+    if not others:
+        return None
+
+    with random_target_lock:
+        # すでにそのターン用の相手が決まっていれば再利用
+        if current_turn in random_target_map:
+            saved = random_target_map[current_turn]
+            if saved in others:
+                return saved
+
+        # 無ければ新しく決める
+        target = random.choice(others)
+        random_target_map[current_turn] = target
+        print(f"[RANDOM TARGET] {current_turn} -> {target}")
+        return target
+
 # --------------------
 # データ取得スレッド
 # --------------------
@@ -194,10 +240,14 @@ def data_fetch_loop():
 
             current_turn = get_current_turn()
             heart_data = get_heart_data()
-
             # ターン変化ログ
             if current_turn != last_turn:
                 print(f"[TURN] {last_turn} -> {current_turn}")
+
+                with random_target_lock:
+                    if last_turn in random_target_map:
+                        del random_target_map[last_turn]
+
                 last_turn = current_turn
 
             if not current_turn or current_turn not in heart_data:
@@ -209,8 +259,14 @@ def data_fetch_loop():
             mode = get_control_mode()
 
             # 参照する心拍のwatchを決める
-            if mode == "next":
+            if mode == "self_fast" or mode == "self_slow":
+                target_watch = current_turn
+            elif mode == "next_fast":
                 target_watch = get_next_watch(current_turn)
+            elif mode == "prev_fast":
+                target_watch = get_prev_watch(current_turn)
+            elif mode == "random_fast":
+                target_watch = get_random_watch(current_turn)
             else:
                 target_watch = current_turn
 
@@ -238,7 +294,12 @@ def data_fetch_loop():
                 continue
 
             diff = bpm - baseline
-            rpm = calculate_rpm(diff)
+
+            if mode == "self_slow":
+                rpm = calculate_rpm_slow(diff)
+            else:
+                rpm = calculate_rpm_fast(diff)
+
             direction = calculate_direction(diff)
 
             # ★回転させる対象は「今ターンの人」（プレイ中の人）
