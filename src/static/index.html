@@ -3,75 +3,138 @@
 <head>
   <meta charset="UTF-8">
   <title>心拍数モニター</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      background-color: #f0f8ff;
-      margin: 0;
-      padding: 20px;
-    }
-    h1 {
-      text-align: center;
-      color: #333;
-    }
-    #rate, #max-rate {
-      width: 45%;
-      padding: 10px;
-      border-radius: 8px;
-      background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .flex-container {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-    .button-container {
-      text-align: center;
-      margin-top: 20px;
-    }
-    button {
-      font-size: 1.2em;
-      padding: 10px 20px;
-      margin: 10px;
-      border: none;
-      border-radius: 6px;
-      background-color: #4CAF50;
-      color: white;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-    button:hover {
-      background-color: #45a049;
-    }
-    .stop-button {
-      background-color: #f44336;
-    }
-    .stop-button:hover {
-      background-color: #e53935;
-    }
-    #turn-display-large {
-      text-align: center;
-      font-size: 3em;
-      font-weight: bold;
-      color: #333;
-      margin-top: 20px;
-    }
-      .graph-container {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 20px;
-  }
-  .watch-graph {
-    width: 45%;
-    min-width: 300px;
-  }
+ <style>
+body {
+  font-family: sans-serif;
+  background: #f4f7fb;
+  margin: 0;
+  padding: 14px;
+  color: #333;
+}
+
+h1 {
+  text-align: center;
+  margin: 0 0 12px;
+  font-size: 1.5em;
+}
+
+h2, h3 {
+  margin: 0 0 8px;
+}
+
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.status-card,
+.card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+
+.status-card {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+#turn-display-large {
+  font-size: 2.4em;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.status-badge {
+  background: #eef3f8;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-weight: bold;
+  font-size: 0.9em;
+}
+
+.compact-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.control-card {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 1.4fr 1.2fr;
+  gap: 12px;
+}
+
+.control-section {
+  border-right: 1px solid #ddd;
+  padding-right: 12px;
+}
+
+.control-section:last-child {
+  border-right: none;
+}
+
+.control-section h3 {
+  font-size: 0.95em;
+}
+
+button {
+  font-size: 0.88em;
+  padding: 8px 12px;
+  margin: 3px;
+  border: none;
+  border-radius: 9px;
+  background-color: #4CAF50;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+.stop-button {
+  background-color: #f44336;
+}
+
+.reset-button {
+  background-color: #2196F3;
+}
+
+.csv-button {
+  background-color: #9C27B0;
+}
+
+select {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  min-width: 100px;
+}
+
+.mode-card {
+  padding-bottom: 12px;
+}
+
+.mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
 .mode-group {
-  margin: 16px 0;
-  padding: 14px;
-  border-radius: 10px;
+  padding: 12px;
+  border-radius: 12px;
 }
 
 .self-group {
@@ -86,34 +149,16 @@
 
 .mode-group-title {
   font-weight: bold;
-  margin-bottom: 10px;
-  font-size: 1.05em;
-}
-
-.mode-btn {
-  margin: 6px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
+  margin-bottom: 8px;
+  font-size: 0.95em;
 }
 
 .self-btn {
   background-color: #43a047;
 }
 
-.self-btn:hover {
-  background-color: #388e3c;
-}
-
 .other-btn {
   background-color: #1e88e5;
-}
-
-.other-btn:hover {
-  background-color: #1565c0;
 }
 
 .mode-btn:disabled {
@@ -121,10 +166,58 @@
   cursor: not-allowed;
 }
 
-.mode-note {
+.mode-note,
+.mode-current {
   margin-top: 8px;
+  font-size: 0.9em;
+  font-weight: bold;
+}
+
+.heart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+#rate, #max-rate {
+  background: #f9fbfd;
+  border-radius: 12px;
+  padding: 12px;
+  min-height: 70px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+#rate div,
+#max-rate div {
+  font-size: 1.1em !important;
+}
+
+.graph-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.watch-graph {
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+
+.watch-graph h3 {
   font-size: 0.95em;
-  color: #555;
+}
+
+.watch-graph canvas {
+  max-height: 210px;
+}
+
+.baseline-mini {
+  font-size: 0.85em;
+  line-height: 1.4;
+  margin-top: 6px;
 }
 
 .mode-banner {
@@ -148,14 +241,25 @@
   transform: translateY(0);
 }
 
-.mode-current {
-  margin-top: 10px;
-  font-weight: bold;
-  color: #333;
-  font-size: 1.1em;
-}
+@media (max-width: 900px) {
+  .control-card,
+  .mode-row,
+  .heart-grid,
+  .graph-container {
+    grid-template-columns: 1fr;
+  }
 
-  </style>
+  .control-section {
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 10px;
+  }
+
+  #turn-display-large {
+    font-size: 2em;
+  }
+}
+</style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
     let intervalId = null;
@@ -357,6 +461,12 @@ async function calculateBaseline() {
       if (res.ok) {
         resultEl.innerText = `${selectedId} の平均値取得完了`;
         updateBaselineUI(selectedId, data.average);
+
+        setTimeout(() => {
+
+        resultEl.innerText = "";
+
+      }, 3000); // 3秒後に消える
       }else {
         resultEl.innerText =
       `${selectedId} の平均値取得に失敗：${data.message || data.error || 'エラー'}`;
@@ -768,7 +878,6 @@ function updateChart(watchId, heartbeat, timestamp) {
 
   charts[watchId].update();
 }
-document.getElementById("baseline-result").innerText = `平均BPM: ${data.average}（${selectedId}）`;
 
 function setMode(mode){
 
@@ -891,70 +1000,97 @@ async function loadCurrentMode() {
   </script>
 </head>
 <body>
-  <h1>心拍数モニター</h1>
+  <div class="dashboard">
+    <h1>心拍数モニター</h1>
 
-  <div class="button-container">
-    <h3>ターン操作</h3>
-    <select id="turnSelector"></select>
-    <button onclick="setTurn()">この人のターンにする</button>
-    <button onclick="nextTurn()" style="font-size: 1.5em; margin-top: 10px;">ターンエンド</button>
-    <hr>
-    <button onclick="startFetching()">取得開始</button>
-    <button class="stop-button" onclick="stopFetching()">取得停止</button>
-    <br>
-    <select id="baselineSelector"></select>
-    <button onclick="calculateBaseline()">平均取得</button>
-    <hr>
-<h3>モーター制御モード</h3>
+    <div class="status-card">
+      <div id="turn-display-large">全員受付中</div>
+      <div id="current-turn"></div>
 
-<div class="mode-group self-group">
-  <div class="mode-group-title">自分の心拍を使うモード</div>
-  <button class="mode-btn self-btn" onclick="setMode('self_fast')">
-    自分・差が大きいほど速い
-  </button>
-  <button class="mode-btn self-btn" onclick="setMode('self_slow')">
-    自分・差が大きいほど遅い
-  </button>
-</div>
+      <div class="status-row">
+        <div id="status" class="status-badge">状態: 未設定</div>
+        <div id="game-status" class="status-badge">ゲーム状態: 未設定</div>
+        <div id="watch-count" class="status-badge">接続中のデバイス数: 未取得</div>
+      </div>
+    </div>
 
-<div class="mode-group other-group">
-  <div class="mode-group-title">他人の心拍を使うモード</div>
-  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('next_fast')">
-    次の人の心拍
-  </button>
-  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('prev_fast')">
-    前の人の心拍
-  </button>
-  <button class="mode-btn other-btn other-mode-btn" onclick="setMode('random_fast')">
-    ランダムな人の心拍
-  </button>
-  <div id="other-mode-note" class="mode-note"></div>
-</div>
+    <div class="compact-grid">
 
-<div id="mode-banner" class="mode-banner"></div>
-<div id="mode-current" class="mode-current">現在の設定：未設定</div>
-    <hr>
-    <button onclick="startGame()">ゲーム開始</button>
-    <button class="stop-button" onclick="stopGame()">ゲーム終了</button>
-    <button onclick="resetServer()" style="background-color: #2196F3;">リセット</button>
-    <button onclick="exportCSV()" id="csvBtn" style="display: none; background-color: #9C27B0;">CSV保存</button>
-    <br>
-<hr>
-      <div id="turn-display-large"></div>
-  <div id="current-turn" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="status" style="text-align:center; font-weight:bold; margin-bottom:10px;">状態: 未設定</div>
-  <div id="game-status" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="watch-count" style="text-align:center; font-weight:bold; margin-bottom:10px;"></div>
-  <div id="baseline-area" style="font-weight:bold; color:#333; margin-top:10px;"></div>
-  <div id="baseline-result" style="font-weight:bold; color:#333; margin-top:10px;"></div>
+      <div class="card control-card">
+        <div class="control-section">
+          <h3>ゲーム</h3>
+          <button onclick="startGame()">開始</button>
+          <button class="stop-button" onclick="stopGame()">終了</button>
+          <button class="reset-button" onclick="resetServer()">リセット</button>
+          <button class="csv-button" onclick="exportCSV()" id="csvBtn" style="display:none;">CSV保存</button>
+        </div>
 
-     <div class="flex-container">
-    <div id="rate"><p>読み込み中...</p></div>
-    <div id="max-rate"><p>最大心拍数を記録中...</p></div>
+        <div class="control-section">
+          <h3>取得</h3>
+          <button onclick="startFetching()">開始</button>
+          <button class="stop-button" onclick="stopFetching()">停止</button>
+        </div>
+
+        <div class="control-section">
+          <h3>ターン</h3>
+          <select id="turnSelector"></select>
+          <button onclick="setTurn()">指定</button>
+          <button onclick="nextTurn()">ターン終了</button>
+        </div>
+
+        <div class="control-section">
+          <h3>平均</h3>
+          <select id="baselineSelector"></select>
+          <button onclick="calculateBaseline()">取得</button>
+          <div id="baseline-area" class="baseline-mini"></div>
+          <div id="baseline-result" class="baseline-mini"></div>
+        </div>
+      </div>
+
+      <div class="card mode-card">
+        <h3>モーター制御モード</h3>
+
+        <div class="mode-row">
+          <div class="mode-group self-group">
+            <div class="mode-group-title">自分の心拍を使う</div>
+            <button class="mode-btn self-btn" onclick="setMode('self_fast')">差が大きいほど速い</button>
+            <button class="mode-btn self-btn" onclick="setMode('self_slow')">差が大きいほど遅い</button>
+          </div>
+
+          <div class="mode-group other-group">
+            <div class="mode-group-title">他人の心拍を使う</div>
+            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('next_fast')">次の人</button>
+            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('prev_fast')">前の人</button>
+            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('random_fast')">ランダム</button>
+            <div id="other-mode-note" class="mode-note"></div>
+          </div>
+        </div>
+
+        <div id="mode-current" class="mode-current">現在の設定：未設定</div>
+      </div>
+
+      <div class="card">
+        <h3>心拍数表示</h3>
+        <div class="heart-grid">
+          <div>
+            <h3>現在の心拍数</h3>
+            <div id="rate"><p>読み込み中...</p></div>
+          </div>
+          <div>
+            <h3>最大心拍数</h3>
+            <div id="max-rate"><p>最大心拍数を記録中...</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>心拍数グラフ</h2>
+        <div id="graph-area" class="graph-container"></div>
+      </div>
+
+    </div>
   </div>
-    <!-- <button id="reset-button">ID初期化</button> -->
-     <h2>心拍数グラフ（30秒表示、リアルタイム更新）</h2>
-  <div id="graph-area" class="graph-container"></div>
-  </div>
+
+  <div id="mode-banner" class="mode-banner"></div>
 </body>
 </html>
