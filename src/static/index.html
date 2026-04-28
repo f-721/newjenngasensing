@@ -259,6 +259,27 @@ select {
     font-size: 2em;
   }
 }
+
+.mini-link-btn {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  font-size: 0.8em;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(80, 80, 80, 0.35);
+  color: white;
+  text-decoration: none;
+  font-weight: bold;
+  z-index: 9998;
+  opacity: 0.45;
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.mini-link-btn:hover {
+  opacity: 1;
+  background: rgba(80, 80, 80, 0.75);
+}
 </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
@@ -1090,7 +1111,7 @@ async function loadCurrentMode() {
 
     </div>
   </div>
-
+<a href="babanuki.html" class="mini-link-btn">ババ抜き画面へ</a>
   <div id="mode-banner" class="mode-banner"></div>
 </body>
 </html>

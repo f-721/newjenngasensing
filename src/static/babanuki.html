@@ -8,83 +8,165 @@
   <style>
     body {
       font-family: sans-serif;
-      background-color: #f0f8ff;
+      background: #f4f7fb;
       margin: 0;
-      padding: 20px;
-    }
-    h1 { text-align:center; margin: 0 0 10px; color:#333; }
-
-    .status {
-      text-align:center;
-      font-weight:bold;
-      margin: 8px 0;
+      padding: 14px;
+      color: #333;
     }
 
-    .button-container {
-      text-align:center;
-      margin: 16px 0 10px;
+    h1 {
+      text-align: center;
+      margin: 0 0 12px;
+      font-size: 1.5em;
     }
+
+    h2, h3 {
+      margin: 0 0 8px;
+    }
+
+    .dashboard {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+      margin-bottom: 12px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .status-badge {
+      background: #eef3f8;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-weight: bold;
+      font-size: 0.9em;
+    }
+
+    .control-card {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.4fr;
+      gap: 12px;
+    }
+
+    .control-section {
+      border-right: 1px solid #ddd;
+      padding-right: 12px;
+    }
+
+    .control-section:last-child {
+      border-right: none;
+    }
+
     button {
-      font-size: 1.1em;
-      padding: 10px 18px;
-      margin: 8px;
+      font-size: 0.9em;
+      padding: 8px 12px;
+      margin: 3px;
       border: none;
-      border-radius: 8px;
+      border-radius: 9px;
       background-color: #4CAF50;
       color: white;
       cursor: pointer;
-      transition: background-color 0.2s;
+      font-weight: bold;
     }
-    button:hover { background-color: #45a049; }
-    button:disabled { opacity: .45; cursor:not-allowed; }
 
-    .stop-button { background-color: #f44336; }
-    .stop-button:hover { background-color: #e53935; }
+    button:hover {
+      opacity: 0.9;
+    }
 
-    .csv-button { background-color: #9C27B0; display:none; }
-    .csv-button:hover { background-color: #8E24AA; }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
 
-    .graph-title { text-align:center; margin: 18px 0 10px; }
+    .stop-button {
+      background-color: #f44336;
+    }
 
-  .graph-container{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 12px;
-    justify-items: stretch;
-  }
+    .csv-button {
+      background-color: #9C27B0;
+      display: none;
+    }
+
+    .link-button {
+      background-color: #607D8B;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 0.9em;
+      padding: 8px 12px;
+      margin: 3px;
+      border-radius: 9px;
+      color: white;
+      font-weight: bold;
+    }
+
+    select {
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      min-width: 100px;
+    }
+
+    .baseline-mini {
+      font-size: 0.85em;
+      line-height: 1.5;
+      margin-top: 6px;
+      font-weight: bold;
+    }
+
+    .graph-title {
+      margin-bottom: 10px;
+    }
+
+    .graph-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
 
     .watch-graph {
-      width: auto;
       min-width: 0;
       background: #fff;
       border-radius: 12px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-      padding: 12px 12px 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      padding: 12px;
     }
 
     .watch-head {
-      display:flex;
-      align-items:baseline;
-      justify-content:space-between;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
       gap: 10px;
       margin-bottom: 6px;
     }
+
     .watch-name {
       font-weight: 800;
-      color:#333;
       font-size: 18px;
     }
+
     .bpm-big {
       font-weight: 900;
-      font-size: 44px;
+      font-size: 42px;
       line-height: 1;
-      color:#111;
+      color: #111;
       white-space: nowrap;
     }
+
     .bpm-big small {
       font-size: 16px;
       font-weight: 700;
-      color:#444;
+      color: #444;
       margin-left: 6px;
     }
 
@@ -96,24 +178,60 @@
       border: 1px solid #ffb3b3;
       color: #b00020;
       font-weight: 800;
-      display: none; /* デフォルト非表示 */
+      display: none;
     }
-    .warn-box.show { display: block; }
+
+    .warn-box.show {
+      display: block;
+    }
 
     .meta {
       margin-top: 6px;
       color: #666;
       font-size: 12px;
-      display:flex;
+      display: flex;
       justify-content: space-between;
       gap: 10px;
       flex-wrap: wrap;
     }
+
     .pill {
-      background:#f6f6f6;
-      border:1px solid #e6e6e6;
-      border-radius:999px;
+      background: #f6f6f6;
+      border: 1px solid #e6e6e6;
+      border-radius: 999px;
       padding: 4px 10px;
+    }
+
+    .mini-link-btn {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      font-size: 0.8em;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(80, 80, 80, 0.35);
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+      z-index: 9998;
+      opacity: 0.45;
+    }
+
+    .mini-link-btn:hover {
+      opacity: 1;
+      background: rgba(80, 80, 80, 0.75);
+    }
+
+    @media (max-width: 900px) {
+      .control-card {
+        grid-template-columns: 1fr;
+      }
+
+      .control-section {
+        border-right: none;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 10px;
+      }
     }
   </style>
 
@@ -121,42 +239,69 @@
 </head>
 
 <body>
-  <h1>ババ抜き：心拍グラフ（30秒表示）</h1>
+  <div class="dashboard">
+    <h1>ババ抜き：心拍グラフ</h1>
 
-  <div id="watch-count" class="status">接続中のデバイス数: --</div>
-  <div id="game-status" class="status">ゲーム状態: --</div>
+    <div class="status-row">
+      <div id="watch-count" class="status-badge">接続中のデバイス数: --</div>
+      <div id="game-status" class="status-badge">ゲーム状態: --</div>
+      <div id="baseline-status" class="status-badge">平均値: 未確認</div>
+    </div>
 
-  <div class="button-container">
-    <button id="startBtn">ゲーム開始</button>
-    <button id="stopBtn" class="stop-button" disabled>ゲーム終了</button>
-    <button id="csvBtn" class="csv-button">CSV保存</button>
+    <div class="card control-card">
+      <div class="control-section">
+        <h3>ゲーム操作</h3>
+        <button id="startBtn">接続待ち...</button>
+        <button id="stopBtn" class="stop-button" disabled>ゲーム終了</button>
+        <button id="csvBtn" class="csv-button">CSV保存</button>
+      </div>
+
+      <div class="control-section">
+        <h3>平均心拍数</h3>
+        <select id="baselineSelector"></select>
+        <button id="baselineBtn">平均取得</button>
+        <div id="baseline-area" class="baseline-mini"></div>
+        <div id="baseline-result" class="baseline-mini"></div>
+      </div>
+
+      <div class="control-section">
+        <h3>画面移動</h3>
+        <a href="index.html" class="link-button">通常画面へ</a>
+        <div class="baseline-mini">
+          ※ゲーム開始には2台以上の接続と、全watchの平均値取得が必要です。
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="graph-title">心拍数グラフ（30秒表示）</h2>
+      <div id="graph-area" class="graph-container"></div>
+    </div>
   </div>
 
-  <h2 class="graph-title">心拍数グラフ（接続デバイス数分）</h2>
-  <div id="graph-area" class="graph-container"></div>
+  <a href="index.html" class="mini-link-btn">通常画面へ</a>
 
 <script>
-  // ===== 設定 =====
   const POLL_MS = 1000;
-  const SUSPICIOUS_BPM = 90;      // ← 警告閾値（とりあえず90）
-  const WARN_HOLD_MS = 1500;      // ← ちょい安定化（1.5秒以上超えたら警告）
-  const WARN_COOLDOWN_MS = 2000;  // ← 連続チカチカ防止（2秒）
+  const SUSPICIOUS_BPM = 90;
+  const WARN_HOLD_MS = 1500;
+  const WARN_COOLDOWN_MS = 2000;
 
-  // ===== 状態 =====
   let isGameRunning = false;
   let plotInterval = null;
+  let watchIds = [];
+  let baselines = {};
 
-  let watchIds = [];          // /clientsから取得したwatchID配列
-  const charts = {};          // watchID -> Chart instance
+  const charts = {};
+  const lastTs = {};
+  const overSince = {};
+  const lastWarnAt = {};
+  const baselineTimers = {};
+  const baselineIntervals = {};
 
-  // watchごとの表示・警告制御
-  const lastBpm = {};         // watchID -> number
-  const lastTs = {};          // watchID -> timestamp(ms)
-  const overSince = {};       // watchID -> Date.now() (閾値超え始め)
-  const lastWarnAt = {};      // watchID -> Date.now() (最後に警告を出した時刻)
-
-  // ===== ユーティリティ =====
-  function $(id) { return document.getElementById(id); }
+  function $(id) {
+    return document.getElementById(id);
+  }
 
   function msAgo(ts) {
     if (!ts) return "--";
@@ -167,20 +312,172 @@
 
   async function refreshClients() {
     const res = await fetch("/clients", { cache: "no-store" });
-    const data = await res.json(); // {count, ids:{ip:watchX}}
-    $("watch-count").innerText = `接続中のデバイス数: ${data.count}`;
-    return Object.values(data.ids || {}).sort();
+    const data = await res.json();
+
+    watchIds = Object.values(data.ids || {}).sort();
+    $("watch-count").innerText = `接続中のデバイス数: ${watchIds.length}`;
+
+    updateBaselineSelector();
+    return watchIds;
+  }
+
+  function updateBaselineSelector() {
+    const selector = $("baselineSelector");
+    const current = selector.value;
+
+    selector.innerHTML = "";
+
+    watchIds.forEach(id => {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      selector.appendChild(option);
+    });
+
+    if (watchIds.includes(current)) {
+      selector.value = current;
+    }
   }
 
   async function refreshGameStatus() {
     try {
       const res = await fetch("/status", { cache: "no-store" });
-      const data = await res.json(); // {running, game_over}
+      const data = await res.json();
+
       $("game-status").innerText = "ゲーム状態: " + (data.running ? "開始中" : "終了");
       return !!data.running;
     } catch (e) {
       $("game-status").innerText = "ゲーム状態: 取得失敗";
       return false;
+    }
+  }
+
+  async function loadBaselines() {
+    try {
+      const res = await fetch("/get_baselines", { cache: "no-store" });
+      baselines = await res.json();
+
+      const area = $("baseline-area");
+      area.innerHTML = "";
+
+      Object.entries(baselines).forEach(([deviceId, avg]) => {
+        const div = document.createElement("div");
+        div.id = `baseline-${deviceId}`;
+        div.innerText = `${deviceId} の平均値：${Math.round(avg)} BPM`;
+        area.appendChild(div);
+      });
+
+      updateBaselineStatus();
+    } catch (e) {
+      console.error("平均値取得失敗", e);
+      $("baseline-status").innerText = "平均値: 取得失敗";
+    }
+  }
+
+  function updateBaselineStatus() {
+    const missing = watchIds.filter(id => baselines[id] === undefined || baselines[id] === null);
+
+    if (watchIds.length === 0) {
+      $("baseline-status").innerText = "平均値: watch未接続";
+      return false;
+    }
+
+    if (missing.length > 0) {
+      $("baseline-status").innerText = `平均値: 未取得あり（${missing.join(", ")}）`;
+      return false;
+    }
+
+    $("baseline-status").innerText = "平均値: 全watch取得済み";
+    return true;
+  }
+
+  async function updateStartButton() {
+    await refreshClients();
+    await loadBaselines();
+
+    const btn = $("startBtn");
+    const hasEnoughWatch = watchIds.length >= 2;
+    const hasAllBaseline = updateBaselineStatus();
+
+    if (isGameRunning) {
+      btn.disabled = true;
+      btn.textContent = "ゲーム中";
+      return;
+    }
+
+    if (!hasEnoughWatch) {
+      btn.disabled = true;
+      btn.textContent = "2台接続待ち...";
+      return;
+    }
+
+    if (!hasAllBaseline) {
+      btn.disabled = true;
+      btn.textContent = "平均値取得待ち...";
+      return;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "ゲーム開始";
+  }
+
+  async function calculateBaseline() {
+    const selectedId = $("baselineSelector").value;
+    if (!selectedId) {
+      alert("デバイスIDが選択されていません");
+      return;
+    }
+
+    const resultEl = $("baseline-result");
+
+    if (baselineTimers[selectedId]) {
+      clearTimeout(baselineTimers[selectedId]);
+      clearInterval(baselineIntervals[selectedId]);
+    }
+
+    try {
+      await fetch("/start_baseline", { method: "POST" });
+      await new Promise(r => setTimeout(r, 1000));
+
+      let countdown = 10;
+      resultEl.innerText = `${selectedId} の平均値取得中... (${countdown}秒)`;
+
+      baselineIntervals[selectedId] = setInterval(() => {
+        countdown--;
+        resultEl.innerText = `${selectedId} の平均値取得中... (${countdown}秒)`;
+      }, 1000);
+
+      baselineTimers[selectedId] = setTimeout(async () => {
+        clearInterval(baselineIntervals[selectedId]);
+
+        const res = await fetch(`/calculate_baseline/${selectedId}`, {
+          method: "POST"
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          resultEl.innerText = `${selectedId} の平均値取得完了`;
+          await loadBaselines();
+          await updateStartButton();
+
+          setTimeout(() => {
+            resultEl.innerText = "";
+          }, 3000);
+        } else {
+          resultEl.innerText =
+            `${selectedId} の平均値取得に失敗：${data.message || data.error || "エラー"}`;
+        }
+
+        await fetch("/stop_baseline", { method: "POST" });
+
+        delete baselineTimers[selectedId];
+        delete baselineIntervals[selectedId];
+      }, 10000);
+
+    } catch (err) {
+      console.error(err);
+      resultEl.innerText = "平均値取得エラー";
     }
   }
 
@@ -207,16 +504,14 @@
         <span class="pill" id="avg-${watchId}">平均: --</span>
       </div>
     `;
+
     container.appendChild(div);
 
     const ctx = document.getElementById(`chart-${watchId}`).getContext("2d");
 
-    // 統計用
-    lastBpm[watchId] = null;
     lastTs[watchId] = 0;
     overSince[watchId] = null;
     lastWarnAt[watchId] = 0;
-    const stat = { max: null, sum: 0, n: 0 };
 
     charts[watchId] = new Chart(ctx, {
       type: "line",
@@ -233,7 +528,9 @@
       options: {
         animation: false,
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false }
+        },
         scales: {
           x: {
             type: "linear",
@@ -241,7 +538,10 @@
             max: 30,
             reverse: true,
             title: { display: true, text: "時間（秒前）" },
-            ticks: { stepSize: 5, callback: (v) => `${v}秒前` }
+            ticks: {
+              stepSize: 5,
+              callback: v => `${v}秒前`
+            }
           },
           y: {
             min: 50,
@@ -252,27 +552,32 @@
       }
     });
 
-    // statsは chart に紐付けて持つ
-    charts[watchId]._stat = stat;
+    charts[watchId]._stat = { max: null, sum: 0, n: 0 };
   }
 
   async function setupGraphs() {
-    watchIds = await refreshClients();
+    await refreshClients();
+
     $("graph-area").innerHTML = "";
-    for (const id of watchIds) createGraph(id);
+
+    Object.keys(charts).forEach(id => {
+      charts[id].destroy();
+      delete charts[id];
+    });
+
+    watchIds.forEach(id => createGraph(id));
   }
 
   function updateStatsUI(watchId, bpm, sampleTs) {
     const stat = charts[watchId]?._stat;
     if (!stat) return;
 
-    // 新しいサンプルのときだけ加算（補完値もtimestampが進むので基本は加算される）
     if (sampleTs && sampleTs > (lastTs[watchId] || 0)) {
       lastTs[watchId] = sampleTs;
 
       stat.sum += bpm;
       stat.n += 1;
-      stat.max = (stat.max == null) ? bpm : Math.max(stat.max, bpm);
+      stat.max = stat.max == null ? bpm : Math.max(stat.max, bpm);
 
       $(`max-${watchId}`).textContent = `最大: ${stat.max}`;
       $(`avg-${watchId}`).textContent = `平均: ${Math.round(stat.sum / stat.n)}`;
@@ -283,7 +588,6 @@
     const now = Date.now();
     const warnEl = $(`warn-${watchId}`);
 
-    // 閾値超え
     if (bpm >= SUSPICIOUS_BPM) {
       if (overSince[watchId] == null) overSince[watchId] = now;
 
@@ -304,29 +608,31 @@
     if (!isGameRunning) return;
 
     const res = await fetch("/get_heart_data", { cache: "no-store" });
-    const data = await res.json(); // {watch1:[...], watch2:[...], ...}
+    const data = await res.json();
 
     const now = Date.now();
 
     for (const watchId of watchIds) {
       const chart = charts[watchId];
       const records = data[watchId];
+
       if (!chart || !Array.isArray(records) || records.length === 0) continue;
 
-      // グラフ
       chart.data.datasets[0].data = records.map(r => ({
         x: (now - r.timestamp) / 1000,
         y: r.heartbeat
       }));
+
       chart.update();
 
-      // 最新値（末尾が最新前提、念のため最大timestamp探す）
       let latest = records[records.length - 1];
+
       for (let i = records.length - 2; i >= 0 && i >= records.length - 10; i--) {
         if (records[i].timestamp > latest.timestamp) latest = records[i];
       }
 
       const bpm = Math.round(latest.heartbeat);
+
       $(`bpm-${watchId}`).innerHTML = `${bpm}<small>bpm</small>`;
       $(`recv-${watchId}`).textContent = `受信: ${msAgo(latest.timestamp)}`;
 
@@ -349,30 +655,51 @@
   }
 
   async function startGame() {
-    const ids = await refreshClients();
-    if (ids.length < 2) {
-      alert("watchが2台以上接続されていません");
+    await updateStartButton();
+
+    if ($("startBtn").disabled) {
+      alert("2台以上の接続と全watchの平均値取得が必要です");
       return;
     }
 
-    const res = await fetch("/start", { method: "POST" });
-    if (!res.ok) {
-      alert("ゲーム開始に失敗しました");
-      return;
+    try {
+      const res = await fetch("/start", { method: "POST" });
+
+      if (!res.ok) {
+        let message = "ゲーム開始に失敗しました";
+
+        try {
+          const data = await res.json();
+          message = data.message || data.error || message;
+        } catch {
+          message = await res.text();
+        }
+
+        alert(message);
+        return;
+      }
+
+      isGameRunning = true;
+
+      $("startBtn").disabled = true;
+      $("startBtn").textContent = "ゲーム中";
+      $("stopBtn").disabled = false;
+      $("csvBtn").style.display = "none";
+
+      await refreshGameStatus();
+      await setupGraphs();
+      startPlotting();
+
+    } catch (e) {
+      console.error(e);
+      alert("ゲーム開始通信エラー");
     }
-
-    isGameRunning = true;
-    $("startBtn").disabled = true;
-    $("stopBtn").disabled = false;
-    $("csvBtn").style.display = "none";
-
-    await refreshGameStatus();
-    await setupGraphs();
-    startPlotting();
   }
 
   async function stopGame() {
-    try { await fetch("/stop", { method: "POST" }); } catch {}
+    try {
+      await fetch("/stop", { method: "POST" });
+    } catch {}
 
     isGameRunning = false;
     stopPlotting();
@@ -382,28 +709,33 @@
     $("csvBtn").style.display = "inline-block";
 
     await refreshGameStatus();
-    await refreshClients();
+    await updateStartButton();
 
     alert("ゲームを終了しました");
   }
 
   async function exportCSV() {
-    if (!confirm("CSVファイルを保存しますか？（ゲーム終了後のみ）")) return;
+    if (!confirm("CSVファイルを保存しますか？")) return;
+
     try {
       const res = await fetch("/export_csv");
+
       if (!res.ok) {
         const msg = await res.text();
         alert("CSV保存に失敗: " + msg);
         return;
       }
+
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
+
       a.href = url;
       a.download = "heart_rate_data.csv";
       document.body.appendChild(a);
       a.click();
       a.remove();
+
       window.URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
@@ -411,31 +743,34 @@
     }
   }
 
-  // ===== イベント =====
-  $("startBtn").addEventListener("click", startGame);
-  $("stopBtn").addEventListener("click", stopGame);
-  $("csvBtn").addEventListener("click", exportCSV);
+  document.addEventListener("DOMContentLoaded", async () => {
+    $("startBtn").addEventListener("click", startGame);
+    $("stopBtn").addEventListener("click", stopGame);
+    $("csvBtn").addEventListener("click", exportCSV);
+    $("baselineBtn").addEventListener("click", calculateBaseline);
 
-  // 起動時：状態反映
-  (async () => {
     const running = await refreshGameStatus();
+
+    await refreshClients();
+    await loadBaselines();
     await setupGraphs();
 
     if (running) {
       isGameRunning = true;
       $("startBtn").disabled = true;
+      $("startBtn").textContent = "ゲーム中";
       $("stopBtn").disabled = false;
       $("csvBtn").style.display = "none";
       startPlotting();
     } else {
-      $("startBtn").disabled = false;
+      isGameRunning = false;
       $("stopBtn").disabled = true;
       $("csvBtn").style.display = "none";
+      await updateStartButton();
     }
 
-    // 接続台数の表示だけは更新し続ける
-    setInterval(refreshClients, 1000);
-  })();
+    setInterval(updateStartButton, 2000);
+  });
 </script>
 </body>
 </html>
