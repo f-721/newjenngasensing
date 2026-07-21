@@ -12,6 +12,14 @@ body {
   color: #333;
 }
 
+html, body {
+  height: 100%;
+}
+
+body {
+  overflow: auto;
+}
+
 h1 {
   text-align: center;
   margin: 0 0 12px;
@@ -23,8 +31,9 @@ h2, h3 {
 }
 
 .dashboard {
-  max-width: 1200px;
+  max-width: 100%;
   margin: 0 auto;
+  padding: 0 18px;
 }
 
 .status-card,
@@ -63,15 +72,28 @@ h2, h3 {
 }
 
 .compact-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: block;
   gap: 12px;
+  align-items: stretch;
+  overflow: visible;
+}
+
+.top-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.top-row > .card {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .control-card {
-  display: grid;
-  grid-template-columns: 1fr 0.8fr 1.4fr 1.2fr;
-  gap: 12px;
+  display: block;
+  gap: 8px;
 }
 
 .control-section {
@@ -127,14 +149,46 @@ select {
 }
 
 .mode-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .mode-group {
-  padding: 12px;
-  border-radius: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.mode-btn {
+  width: auto;
+  display: inline-block;
+  text-align: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.compact-rotation details summary {
+  cursor: pointer;
+  font-weight: bold;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.compact-rotation .compact-controls {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.mode-btn.small {
+  padding: 6px 8px;
+  font-size: 0.85em;
 }
 
 .self-group {
@@ -195,26 +249,40 @@ select {
 
 .graph-container {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  width: 100%;
+  justify-items: center;
 }
 
 .watch-graph {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   background: #fff;
   border-radius: 12px;
   padding: 10px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  width: 100%;
+  max-width: 340px;
 }
 
 .watch-graph h3 {
   font-size: 0.95em;
+  margin: 0 0 10px;
 }
 
-.watch-graph canvas {
-  max-height: 210px;
+.chart-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
 }
 
-.baseline-mini {
+.chart-wrapper canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100% !important;
   font-size: 0.85em;
   line-height: 1.4;
   margin-top: 6px;
@@ -241,10 +309,24 @@ select {
   transform: translateY(0);
 }
 
-@media (max-width: 900px) {
-  .control-card,
-  .mode-row,
-  .heart-grid,
+.current-used {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 1.03em;
+  font-weight: 800;
+  color: #222;
+  background: linear-gradient(180deg, #fff7d6 0%, #fff3c4 100%);
+  border: 1px solid #ffd966;
+  padding: 6px 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+@media (max-width: 1200px) {
+  .compact-grid {
+    grid-template-columns: 1fr; /* スマホ・タブレットは縦並び */
+  }
+
   .graph-container {
     grid-template-columns: 1fr;
   }
@@ -602,43 +684,106 @@ async function loadBaselineToUI() {
       try {
         const clientRes = await fetch("/clients");
         const turnRes = await fetch("/turn");
+
         const clients = await clientRes.json();
         const current = (await turnRes.json()).current_turn;
+
         const ids = Object.values(clients.ids).sort();
         const idx = ids.indexOf(current);
         const nextId = ids[(idx + 1) % ids.length];
+
         const res = await fetch("/set_turn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ current_turn: nextId })
         });
+
         const result = await res.json();
-        alert(result.message);
+
+        if (!res.ok) {
+          alert(result.message || "ターン変更失敗");
+          return;
+        }
+
         refreshCurrentTurn();
+
       } catch (e) {
         console.error(e);
         alert("ターン変更に失敗しました");
       }
     }
+async function exportCSV() {
+  const inputName = prompt("CSVファイル名を入力してください（空欄なら自動名で保存）", "");
 
-    async function exportCSV() {
-      if (!confirm("CSVファイルを保存しますか？")) return;
-      try {
-        const res = await fetch('/export_csv');
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = "heart_rate_data.csv";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } catch (error) {
-        console.error(error);
-        alert("CSV保存に失敗しました");
-      }
+  let url = "/export_csv";
+
+  if (inputName !== null && inputName.trim() !== "") {
+    url += "?filename=" + encodeURIComponent(inputName.trim());
+  }
+
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      const msg = await res.text();
+      alert("CSV保存に失敗: " + msg);
+      return;
     }
+
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = downloadUrl;
+    a.download = inputName && inputName.trim() !== ""
+      ? inputName.trim().replace(/\.csv$/i, "") + ".csv"
+      : "heart_rate_data.csv";
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (error) {
+    console.error(error);
+    alert("CSV保存に失敗しました");
+  }
+}
+
+async function recordCollapse() {
+  const notes = document.getElementById("collapseNotes").value;
+  const statusEl = document.getElementById("collapse-status");
+  
+  try {
+    const res = await fetch("/collapse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "倒壊",
+        notes: notes
+      })
+    });
+    
+    const data = await res.json();
+    
+    if (res.ok) {
+      statusEl.innerText = "✓ 倒壊を記録しました";
+      statusEl.style.color = "#4caf50";
+      document.getElementById("collapseNotes").value = "";
+      
+      setTimeout(() => {
+        statusEl.innerText = "";
+      }, 3000);
+    } else {
+      statusEl.innerText = "✗ 記録に失敗しました";
+      statusEl.style.color = "#f44336";
+    }
+  } catch (error) {
+    console.error(error);
+    statusEl.innerText = "✗ 通信エラーが発生しました";
+    statusEl.style.color = "#f44336";
+  }
+}
 
 
     function getRandomColor() {
@@ -654,6 +799,8 @@ window.onload = async () => {
   }
 
 await loadCurrentMode();
+await loadCurrentRotationDirection();
+await loadCurrentRotationHold();
 await updateModeButtons();
 setInterval(updateModeButtons, 2000);
 
@@ -676,6 +823,7 @@ window.addEventListener("load", async () => {
 
   await refreshGameStatus();
   await refreshCurrentTurn();
+  await refreshCurrentTarget();
   await refreshClientList();
   await setupGraphs();
   await loadBaselineToUI();
@@ -693,6 +841,34 @@ window.addEventListener("load", async () => {
   }
   await restoreBaselineStatus();
 };
+
+async function refreshCurrentTarget() {
+  try {
+    const resTurn = await fetch('/turn');
+    const turn = await resTurn.json();
+    const current = turn.current_turn;
+
+    if (!current) {
+      document.getElementById('current-target').innerText = '利用対象: 未設定';
+      const usedEl = document.getElementById('current-used');
+      if (usedEl) usedEl.innerText = '利用中の心拍: 未設定';
+      return;
+    }
+
+    const res = await fetch('/get_rotation_status');
+    const data = await res.json();
+    const info = data[current] || {};
+    const target = info.target_watch || info.target || '';
+
+    document.getElementById('current-target').innerText = `利用対象: ${target || '未設定'}`;
+    const usedEl = document.getElementById('current-used');
+    if (usedEl) usedEl.innerText = `利用中の心拍: ${target || '未設定'}`;
+  } catch (e) {
+    console.error('refreshCurrentTarget failed', e);
+  }
+}
+
+setInterval(refreshCurrentTarget, 1000);
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
@@ -724,7 +900,6 @@ function startHeartDataLoop() {
 
           const data = await res.json();
           if (res.ok) {
-            alert(`ターン終了 → 次: ${data.next_turn}`);
             await refreshCurrentTurn();
           } else {
             alert("ターン終了失敗: " + (data.error || data.message));
@@ -750,11 +925,14 @@ function createGraph(watchId) {
   div.className = "watch-graph";
   div.innerHTML = `
     <h3>${watchId}</h3>
-    <canvas id="chart-${watchId}" height="200"></canvas>
+    <div class="chart-wrapper">
+      <canvas id="chart-${watchId}"></canvas>
+    </div>
   `;
   container.appendChild(div);
 
-  const ctx = document.getElementById(`chart-${watchId}`).getContext('2d');
+  const canvas = div.querySelector('canvas');
+  const ctx = canvas.getContext('2d');
 
   dataBuffers[watchId] = [];
 
@@ -774,7 +952,9 @@ function createGraph(watchId) {
   options: {
     animation: false,
     responsive: true,
-scales: {
+    maintainAspectRatio: true,
+    aspectRatio: 1,
+    scales: {
   x: {
   type: 'linear',
   min: 0,
@@ -831,13 +1011,27 @@ async function setupGraphs() {
     const res = await fetch('/clients');
     const data = await res.json();
     watchIds = Object.values(data.ids);
-
     const container = document.getElementById("graph-area");
+
+    // 既存のチャートがあれば破棄してから DOM をクリア（重複描画防止）
+    for (const id in charts) {
+      try {
+        charts[id].destroy();
+      } catch (e) {
+        console.warn('chart destroy failed for', id, e);
+      }
+      delete charts[id];
+    }
+    // バッファもクリア
+    for (const id in dataBuffers) delete dataBuffers[id];
+
     container.innerHTML = ""; // 初期化
 
     for (const watchId of watchIds) {
       createGraph(watchId);
     }
+
+    // 一度だけ最新データを取得して描画
     fetchHeartData();
     // setInterval(fetchHeartData, 1000); // 毎秒取得
   } catch (err) {
@@ -900,40 +1094,37 @@ function updateChart(watchId, heartbeat, timestamp) {
   charts[watchId].update();
 }
 
-function setMode(mode){
+async function setMode(mode) {
+  try {
+    const resClient = await fetch("/clients");
+    const dataClient = await resClient.json();
+    const count = dataClient.count || 0;
 
-    fetch("/clients")
-    .then(res => res.json())
-    .then(data => {
+    if (["next_fast", "prev_fast", "random_fast"].includes(mode) && count < 2) {
+      showBanner("他人の心拍モードは2台以上接続時のみ使用できます");
+      return;
+    }
 
-        const count = data.count;
-
-        // NEXTモードは2台以上必要
-        if(mode === "next" && count <= 1){
-            alert("NEXTモードは2台以上接続されていないと使用できません！");
-            return;
-        }
-
-        // モード変更
-        fetch("/set_control_mode",{
-            method:"POST",
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({mode:mode})
-        })
-        .then(res => res.json())
-        .then(data => {
-
-            if(mode === "self"){
-                alert("自分の心拍モードに変更しました");
-            }
-
-            if(mode === "next"){
-                alert("次の人の心拍モードに変更しました");
-            }
-
-        });
-
+    const res = await fetch("/set_control_mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode })
     });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      showBanner(data.message || "モード変更に失敗しました");
+      return;
+    }
+
+    const label = getModeLabel(mode);
+    document.getElementById("mode-current").innerText = `現在の設定：${label}`;
+    showBanner(`モード変更：${label}`);
+  } catch (e) {
+    console.error(e);
+    showBanner("モード変更通信エラー");
+  }
 }
 
 function getModeLabel(mode) {
@@ -942,9 +1133,93 @@ function getModeLabel(mode) {
     self_slow: "自分の心拍（差が大きいほど遅い）",
     next_fast: "他人の心拍（次の人）",
     prev_fast: "他人の心拍（前の人）",
-    random_fast: "他人の心拍（ランダム）"
+    random_fast: "他人の心拍（ランダム）",
+    highest_diff: "差分が一番大きい人",
+    lowest_diff: "差分が一番小さい人"
   };
   return modeNames[mode] || mode;
+}
+
+function getDirectionLabel(direction) {
+  const directionNames = {
+    auto: "自動",
+    c: "時計回り",
+    a: "反時計回り"
+  };
+  return directionNames[direction] || direction;
+}
+
+async function setRotationDirection(direction) {
+  try {
+    const res = await fetch("/set_rotation_direction", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ direction })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      showBanner(data.message || "回転指定変更に失敗しました");
+      return;
+    }
+
+    document.getElementById("direction-current").innerText = `回転指定：${getDirectionLabel(direction)}`;
+    showBanner(`回転指定：${getDirectionLabel(direction)} に変更しました`);
+  } catch (e) {
+    console.error(e);
+    showBanner("回転指定通信エラー");
+  }
+}
+
+async function loadCurrentRotationDirection() {
+  try {
+    const res = await fetch("/get_rotation_direction");
+    const data = await res.json();
+    const label = getDirectionLabel(data.direction);
+    document.getElementById("direction-current").innerText = `回転指定：${label}`;
+  } catch (e) {
+    console.error("回転指定取得失敗", e);
+  }
+}
+
+function getHoldLabel(hold) {
+  return hold ? "5秒キープ" : "即時切替";
+}
+
+async function setRotationHold(hold) {
+  try {
+    const res = await fetch("/set_rotation_hold", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({hold})
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showBanner(data.message || "切り替え設定変更に失敗しました");
+      return;
+    }
+
+    document.getElementById("hold-current").innerText = `切り替え：${getHoldLabel(data.hold)}`;
+    showBanner(`切り替え設定：${getHoldLabel(data.hold)} に変更しました`);
+  } catch (e) {
+    console.error(e);
+    showBanner("切り替え設定通信エラー");
+  }
+}
+
+async function loadCurrentRotationHold() {
+  try {
+    const res = await fetch("/get_rotation_hold");
+    const data = await res.json();
+    const label = getHoldLabel(data.hold);
+    document.getElementById("hold-current").innerText = `切り替え：${label}`;
+  } catch (e) {
+    console.error("切り替え設定取得失敗", e);
+  }
 }
 
 function showBanner(message) {
@@ -963,7 +1238,7 @@ async function updateModeButtons() {
     const data = await res.json();
     const count = data.count || 0;
 
-    const otherButtons = document.querySelectorAll(".other-mode-btn");
+    const otherButtons = document.querySelectorAll(".requires-two");
     const note = document.getElementById("other-mode-note");
 
     const canUseOtherMode = count >= 2;
@@ -1018,6 +1293,24 @@ async function loadCurrentMode() {
     console.error("現在モード取得失敗", e);
   }
 }
+
+async function resetGameOnly() {
+  if (!confirm("次のゲーム用に心拍データだけリセットしますか？")) return;
+
+  try {
+    const res = await fetch("/reset_game", { method: "POST" });
+    const data = await res.json();
+
+    if (res.ok) {
+      alert("次のゲーム用にリセットしました");
+    } else {
+      alert(data.message || "ゲームリセットに失敗しました");
+    }
+  } catch (e) {
+    console.error(e);
+    alert("ゲームリセット通信エラー");
+  }
+}
   </script>
 </head>
 <body>
@@ -1032,10 +1325,13 @@ async function loadCurrentMode() {
         <div id="status" class="status-badge">状態: 未設定</div>
         <div id="game-status" class="status-badge">ゲーム状態: 未設定</div>
         <div id="watch-count" class="status-badge">接続中のデバイス数: 未取得</div>
+        <div id="current-target" class="status-badge">利用対象: 未設定</div>
       </div>
     </div>
 
     <div class="compact-grid">
+
+      <div class="top-row">
 
       <div class="card control-card">
         <div class="control-section">
@@ -1043,7 +1339,17 @@ async function loadCurrentMode() {
           <button onclick="startGame()">開始</button>
           <button class="stop-button" onclick="stopGame()">終了</button>
           <button class="reset-button" onclick="resetServer()">リセット</button>
+          <button onclick="resetGameOnly()">ゲームだけリセット</button>
           <button class="csv-button" onclick="exportCSV()" id="csvBtn" style="display:none;">CSV保存</button>
+        </div>
+
+        <div class="control-section">
+          <h3>ジェンガ倒壊</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <input type="text" id="collapseNotes" placeholder="メモ（任意）" style="padding: 8px; border-radius: 8px; border: 1px solid #ccc;">
+            <button onclick="recordCollapse()" style="background-color: #d32f2f;">倒壊を記録</button>
+          </div>
+          <div id="collapse-status" style="margin-top: 10px; font-size: 0.9em; color: #666;"></div>
         </div>
 
         <div class="control-section">
@@ -1080,28 +1386,57 @@ async function loadCurrentMode() {
 
           <div class="mode-group other-group">
             <div class="mode-group-title">他人の心拍を使う</div>
-            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('next_fast')">次の人</button>
-            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('prev_fast')">前の人</button>
-            <button class="mode-btn other-btn other-mode-btn" onclick="setMode('random_fast')">ランダム</button>
+            <button class="mode-btn other-btn requires-two" onclick="setMode('next_fast')">次の人</button>
+            <button class="mode-btn other-btn requires-two" onclick="setMode('prev_fast')">前の人</button>
+            <button class="mode-btn other-btn requires-two" onclick="setMode('random_fast')">ランダム</button>
             <div id="other-mode-note" class="mode-note"></div>
+          </div>
+
+          <div class="mode-group other-group">
+            <div class="mode-group-title">差分の極値を使う</div>
+            <button class="mode-btn other-btn" onclick="setMode('highest_diff')">差分が一番大きい人</button>
+            <button class="mode-btn other-btn" onclick="setMode('lowest_diff')">差分が一番小さい人</button>
+            <div class="mode-note">基準との差分を見て、回転対象を自動選択</div>
+          </div>
+
+          <div class="mode-group compact-rotation">
+            <details>
+              <summary id="rotation-summary">回転設定: <span id="direction-current">自動</span> / <span id="hold-current">5秒キープ</span></summary>
+              <div class="compact-controls">
+                <div class="mode-group-title">回転指定</div>
+                <div class="compact-btns">
+                  <button class="mode-btn dir-btn small" onclick="setRotationDirection('auto')">自動</button>
+                  <button class="mode-btn dir-btn small" onclick="setRotationDirection('c')">時計</button>
+                  <button class="mode-btn dir-btn small" onclick="setRotationDirection('a')">反時計</button>
+                </div>
+                <div class="mode-group-title">切り替え</div>
+                <div class="compact-btns">
+                  <button class="mode-btn dir-btn small" onclick="setRotationHold(true)">5秒</button>
+                  <button class="mode-btn dir-btn small" onclick="setRotationHold(false)">即時</button>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
 
         <div id="mode-current" class="mode-current">現在の設定：未設定</div>
       </div>
 
+      
       <div class="card">
         <h3>心拍数表示</h3>
         <div class="heart-grid">
           <div>
             <h3>現在の心拍数</h3>
             <div id="rate"><p>読み込み中...</p></div>
+            <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
           </div>
           <div>
             <h3>最大心拍数</h3>
             <div id="max-rate"><p>最大心拍数を記録中...</p></div>
           </div>
         </div>
+      </div>
       </div>
 
       <div class="card">

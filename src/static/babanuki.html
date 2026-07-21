@@ -233,6 +233,99 @@
         padding-bottom: 10px;
       }
     }
+
+    .watch-graph.alert {
+    border: 3px solid #ff4444;
+    box-shadow: 0 0 20px rgba(255,0,0,0.7);
+}
+
+.bpm-alert{
+    color:red !important;
+}
+
+.game-state-card {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.3fr;
+  gap: 12px;
+}
+
+.turn-big {
+  font-size: 1.4em;
+  font-weight: 900;
+}
+
+.player-row {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f6f6f6;
+  margin: 5px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.player-row.finished {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.log-box {
+  max-height: 130px;
+  overflow-y: auto;
+  font-size: 0.85em;
+  background: #f7f7f7;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.watch-graph.current-turn {
+  border: 4px solid #2196F3;
+  box-shadow: 0 0 15px rgba(33,150,243,0.5);
+}
+
+.watch-graph {
+  transition: background 0.3s, box-shadow 0.3s, border 0.3s;
+}
+
+.watch-graph.level-0 {
+  background: #ffffff;
+}
+
+.watch-graph.level-1 {
+  background: #fff8e1;
+}
+
+.watch-graph.level-2 {
+  background: #ffe0b2;
+}
+
+.watch-graph.level-3 {
+  background: #ffcdd2;
+}
+
+.watch-graph.level-4 {
+  background: #ff8a80;
+  box-shadow: 0 0 20px rgba(213,0,0,0.5);
+}
+.bpm-level-0 {
+  color: #111 !important;
+}
+
+.bpm-level-1 {
+  color: #f9a825 !important;
+}
+
+.bpm-level-2 {
+  color: #fb8c00 !important;
+}
+
+.bpm-level-3 {
+  color: #e53935 !important;
+}
+
+.bpm-level-4 {
+  color: #b71c1c !important;
+}
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -266,7 +359,7 @@
 
       <div class="control-section">
         <h3>画面移動</h3>
-        <a href="index.html" class="link-button">通常画面へ</a>
+        <a href="/" class="link-button">通常画面へ</a>
         <div class="baseline-mini">
           ※ゲーム開始には2台以上の接続と、全watchの平均値取得が必要です。
         </div>
@@ -275,11 +368,32 @@
 
     <div class="card">
       <h2 class="graph-title">心拍数グラフ（30秒表示）</h2>
+
+      <div class="card game-state-card">
+  <div>
+    <h3>現在の行動</h3>
+    <div id="turn-action" class="turn-big">--</div>
+    <div id="draw-target" class="baseline-mini">カードを引く相手: --</div>
+    <button onclick="nextBabanukiTurn()">次のターンへ</button>
+  <button onclick="resetBabanukiLocal()">上がり状態リセット</button>
+  </div>
+
+  <div>
+    <h3>プレイヤー状態</h3>
+    <div id="player-state-area"></div>
+  </div>
+
+  <div>
+    <h3>ゲームログ</h3>
+    <div id="game-log" class="log-box"></div>
+  </div>
+</div>
+
       <div id="graph-area" class="graph-container"></div>
     </div>
   </div>
 
-  <a href="index.html" class="mini-link-btn">通常画面へ</a>
+  <a href="/" class="mini-link-btn">通常画面へ</a>
 
 <script>
   const POLL_MS = 1000;
@@ -309,6 +423,125 @@
     if (d < 1500) return "今";
     return Math.round(d / 1000) + "秒前";
   }
+
+  let finishedPlayers = JSON.parse(localStorage.getItem("finishedPlayers") || "[]");
+let gameLogs = JSON.parse(localStorage.getItem("babanukiLogs") || "[]");
+
+function saveBabanukiState() {
+  localStorage.setItem("finishedPlayers", JSON.stringify(finishedPlayers));
+  localStorage.setItem("babanukiLogs", JSON.stringify(gameLogs));
+}
+
+function getActivePlayers() {
+  return watchIds.filter(id => !finishedPlayers.includes(id));
+}
+
+function getDrawTarget(currentTurn) {
+  const active = getActivePlayers();
+
+  if (!currentTurn || !active.includes(currentTurn)) return "--";
+  if (active.length <= 1) return "--";
+
+  const idx = active.indexOf(currentTurn);
+  return active[(idx + 1) % active.length];
+}
+
+function addGameLog(text) {
+  const time = new Date().toLocaleTimeString();
+  gameLogs.unshift(`${time} ${text}`);
+  gameLogs = gameLogs.slice(0, 30);
+  saveBabanukiState();
+  renderGameLog();
+}
+
+function renderGameLog() {
+  const logEl = $("game-log");
+  logEl.innerHTML = gameLogs.map(log => `<div>${log}</div>`).join("");
+}
+
+function renderPlayerState() {
+  const area = $("player-state-area");
+  area.innerHTML = "";
+
+  watchIds.forEach(id => {
+    const div = document.createElement("div");
+    div.className = "player-row";
+
+    if (finishedPlayers.includes(id)) {
+      div.classList.add("finished");
+    }
+
+    div.innerHTML = `
+      <span>${finishedPlayers.includes(id) ? "✓" : "●"} ${id}</span>
+      <button onclick="toggleFinished('${id}')">
+        ${finishedPlayers.includes(id) ? "復帰" : "上がり"}
+      </button>
+    `;
+
+    area.appendChild(div);
+  });
+}
+
+async function toggleFinished(watchId) {
+  let eventType = "";
+  let message = "";
+
+  if (finishedPlayers.includes(watchId)) {
+    finishedPlayers = finishedPlayers.filter(id => id !== watchId);
+    eventType = "revive";
+    message = `${watchId} が復帰`;
+  } else {
+    finishedPlayers.push(watchId);
+    eventType = "finish";
+    message = `${watchId} が上がり`;
+  }
+
+  await fetch("/log_babanuki_event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      event_type: eventType,
+      player: watchId
+    })
+  });
+
+  addGameLog(message);
+  saveBabanukiState();
+  refreshBabanukiState();
+}
+function highlightCurrentTurn(turnId) {
+  document.querySelectorAll(".watch-graph").forEach(el => {
+    el.classList.remove("current-turn");
+  });
+
+  const target = document.querySelector(`[data-watch="${turnId}"]`);
+  if (target) {
+    target.classList.add("current-turn");
+  }
+}
+
+async function refreshBabanukiState() {
+  await refreshClients();
+
+  try {
+    const res = await fetch("/turn", { cache: "no-store" });
+    const data = await res.json();
+
+    const currentTurn = data.current_turn || "--";
+    const target = getDrawTarget(currentTurn);
+
+    $("turn-action").innerText = `${currentTurn} の番`;
+    $("draw-target").innerText = `カードを引く相手: ${target}`;
+
+    highlightCurrentTurn(currentTurn);
+    renderPlayerState();
+    renderGameLog();
+
+  } catch (e) {
+    console.error(e);
+    $("turn-action").innerText = "ターン取得失敗";
+  }
+}
 
   async function refreshClients() {
     const res = await fetch("/clients", { cache: "no-store" });
@@ -486,6 +719,7 @@
 
     const div = document.createElement("div");
     div.className = "watch-graph";
+    div.dataset.watch = watchId;
     div.innerHTML = `
       <div class="watch-head">
         <div class="watch-name">${watchId}</div>
@@ -494,9 +728,7 @@
 
       <canvas id="chart-${watchId}" height="220"></canvas>
 
-      <div class="warn-box" id="warn-${watchId}">
-        ⚠️ ${watchId} がババを持っているかもしれない…
-      </div>
+      <div class="warn-box" id="warn-${watchId}"></div>
 
       <div class="meta">
         <span class="pill" id="recv-${watchId}">受信: --</span>
@@ -585,24 +817,41 @@
   }
 
   function updateWarning(watchId, bpm) {
-    const now = Date.now();
-    const warnEl = $(`warn-${watchId}`);
+  const graphCard = document.querySelector(`[data-watch="${watchId}"]`);
+  const bpmEl = $(`bpm-${watchId}`);
 
-    if (bpm >= SUSPICIOUS_BPM) {
-      if (overSince[watchId] == null) overSince[watchId] = now;
+  if (!graphCard || !bpmEl) return;
 
-      const held = now - overSince[watchId];
-      const cooled = now - (lastWarnAt[watchId] || 0);
+  const baseline = baselines[watchId];
 
-      if (held >= WARN_HOLD_MS && cooled >= WARN_COOLDOWN_MS) {
-        warnEl.classList.add("show");
-        lastWarnAt[watchId] = now;
-      }
-    } else {
-      overSince[watchId] = null;
-      warnEl.classList.remove("show");
-    }
+  graphCard.classList.remove("level-0", "level-1", "level-2", "level-3", "level-4");
+  bpmEl.classList.remove("bpm-level-0", "bpm-level-1", "bpm-level-2", "bpm-level-3", "bpm-level-4");
+
+  if (baseline === undefined || baseline === null || baseline === "") {
+    graphCard.classList.add("level-0");
+    bpmEl.classList.add("bpm-level-0");
+    return;
   }
+
+  const diff = bpm - Math.round(Number(baseline));
+
+  let level = 0;
+
+  if (diff >= 15) {
+    level = 4;
+  } else if (diff >= 10) {
+    level = 3;
+  } else if (diff >= 5) {
+    level = 2;
+  } else if (diff >= 2) {
+    level = 1;
+  } else {
+    level = 0;
+  }
+
+  graphCard.classList.add(`level-${level}`);
+  bpmEl.classList.add(`bpm-level-${level}`);
+}
 
   async function plotOnce() {
     if (!isGameRunning) return;
@@ -714,35 +963,45 @@
     alert("ゲームを終了しました");
   }
 
-  async function exportCSV() {
-    if (!confirm("CSVファイルを保存しますか？")) return;
+async function exportCSV() {
+  if (!confirm("CSVファイルを保存しますか？")) return;
 
-    try {
-      const res = await fetch("/export_csv");
+  const inputName = prompt("CSVファイル名を入力してください（空欄なら自動名で保存）", "");
 
-      if (!res.ok) {
-        const msg = await res.text();
-        alert("CSV保存に失敗: " + msg);
-        return;
-      }
+  let url = "/export_babanuki_csv";
 
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-
-      a.href = url;
-      a.download = "heart_rate_data.csv";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-      alert("CSV保存に失敗しました");
-    }
+  if (inputName !== null && inputName.trim() !== "") {
+    url += "?filename=" + encodeURIComponent(inputName.trim());
   }
 
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      const msg = await res.text();
+      alert("CSV保存に失敗: " + msg);
+      return;
+    }
+
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = downloadUrl;
+    a.download = inputName && inputName.trim() !== ""
+      ? inputName.trim().replace(/\.csv$/i, "") + ".csv"
+      : "babanuki_heart_data.csv";
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (e) {
+    console.error(e);
+    alert("CSV保存に失敗しました");
+  }
+}
   document.addEventListener("DOMContentLoaded", async () => {
     $("startBtn").addEventListener("click", startGame);
     $("stopBtn").addEventListener("click", stopGame);
@@ -770,7 +1029,79 @@
     }
 
     setInterval(updateStartButton, 2000);
+    await refreshBabanukiState();
+    setInterval(refreshBabanukiState, 1000);
   });
+
+  async function nextBabanukiTurn() {
+  const active = getActivePlayers();
+
+  if (active.length <= 1) {
+    alert("残りプレイヤーが1人以下です");
+    return;
+  }
+
+  const res = await fetch("/turn", { cache: "no-store" });
+  const data = await res.json();
+  const currentTurn = data.current_turn;
+
+  let nextId;
+
+  if (!currentTurn || !active.includes(currentTurn)) {
+    nextId = active[0];
+  } else {
+    const idx = active.indexOf(currentTurn);
+    nextId = active[(idx + 1) % active.length];
+  }
+
+  const setRes = await fetch("/set_turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_turn: nextId })
+  });
+
+  const result = await setRes.json();
+
+  if (!setRes.ok) {
+    alert(result.message || "ターン変更に失敗しました");
+    return;
+  }
+
+const target = getDrawTarget(nextId);
+
+// ババ抜き状態をサーバーに保存
+await fetch("/set_babanuki_state", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    current_turn: nextId,
+    draw_target: target
+  })
+});
+
+// ババ抜きイベントログをサーバーに保存
+await fetch("/log_babanuki_event", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    event_type: "turn_set",
+    current_turn: nextId,
+    draw_target: target
+  })
+});
+
+addGameLog(`${nextId} の番 → ${target} から引く`);
+await refreshBabanukiState();
+}
+
+function resetBabanukiLocal() {
+  finishedPlayers = [];
+  gameLogs = [];
+  saveBabanukiState();
+  refreshBabanukiState();
+}
+
+
 </script>
 </body>
 </html>

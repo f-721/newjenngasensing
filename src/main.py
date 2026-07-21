@@ -19,7 +19,6 @@ app.register_blueprint(id_api)
 clients = {}
 id_counter = 1
 file_lock = threading.Lock()
-
 DATA_FILE = 'heart_rates.json'
 GAME_STATUS_FILE = 'game_status.json'
 TURN_FILE = 'turn.json'
