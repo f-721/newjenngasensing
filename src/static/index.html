@@ -859,10 +859,16 @@ async function refreshCurrentTarget() {
     const data = await res.json();
     const info = data[current] || {};
     const target = info.target_watch || info.target || '';
+    const rpm = Number.isFinite(Number(info.rpm)) ? Number(info.rpm) : null;
+    const directionNames = { c: '時計回り', a: '反時計回り' };
+    const direction = directionNames[info.direction] || '未設定';
 
     document.getElementById('current-target').innerText = `利用対象: ${target || '未設定'}`;
     const usedEl = document.getElementById('current-used');
-    if (usedEl) usedEl.innerText = `利用中の心拍: ${target || '未設定'}`;
+    if (usedEl) {
+      const speed = rpm === null ? '未設定' : `${rpm} rpm`;
+      usedEl.innerText = `利用中の心拍: ${target || '未設定'} / 回転速度: ${speed} / 回転方向: ${direction}`;
+    }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
   }

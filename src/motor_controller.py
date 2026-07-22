@@ -162,6 +162,22 @@ def get_control_mode():
     except:
         return "self"
 
+def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction):
+    try:
+        requests.post(
+            f"{API_HOST}/set_rotation_status",
+            json={
+                "motor_watch": motor_watch,
+                "target_watch": target_watch,
+                "mode": mode,
+                "rpm": rpm,
+                "direction": direction,
+            },
+            timeout=2,
+        )
+    except requests.RequestException:
+        pass
+
 # --------------------
 # 次のwatch取得
 # --------------------
@@ -218,6 +234,29 @@ def get_random_watch(current_turn):
         random_target_map[current_turn] = target
         print(f"[RANDOM TARGET] {current_turn} -> {target}")
         return target
+
+def get_difference_watch(current_turn, heart_data, largest):
+    candidates = []
+
+    with baseline_lock:
+        baselines = dict(baseline_cache)
+
+    for watch_id in get_watch_ids():
+        if watch_id == current_turn:
+            continue
+
+        try:
+            bpm = float(heart_data.get(watch_id, {}).get("heartbeat"))
+            baseline = float(baselines[watch_id])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        candidates.append((abs(bpm - baseline), watch_id))
+
+    if not candidates:
+        return None
+
+    return (max if largest else min)(candidates)[1]
 
 # --------------------
 # データ取得スレッド
@@ -284,6 +323,10 @@ def data_fetch_loop():
                 target_watch = get_prev_watch(current_turn)
             elif mode == "random_fast":
                 target_watch = get_random_watch(current_turn)
+            elif mode == "highest_diff":
+                target_watch = get_difference_watch(current_turn, heart_data, largest=True)
+            elif mode == "lowest_diff":
+                target_watch = get_difference_watch(current_turn, heart_data, largest=False)
             else:
                 target_watch = current_turn
 
@@ -332,6 +375,7 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
+            publish_rotation_status(current_turn, target_watch, mode, rpm, direction)
             print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}")
 
             time.sleep(1)

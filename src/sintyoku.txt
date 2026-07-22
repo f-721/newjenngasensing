@@ -1,0 +1,281 @@
+現在、Pixel Watchで取得した心拍数をFlaskサーバへ送信し、その値に応じてRaspberry Piに接続したステッピングモータの回転速度を変化させるジェンガゲームを開発しています。
+
+今回、新しく「他人の心拍数を利用して特定のプレイヤーを妨害する機能」を追加したいです。
+
+## 現在の構成
+
+- Pixel Watch
+  - 心拍数を取得
+  - Flaskサーバへ送信
+- Flask
+  - 心拍数
+  - ゲーム開始・停止
+  - 現在のターン
+  - 各Watch ID
+  - ベースライン心拍数
+  - 回転情報
+  などを管理
+- Raspberry Pi
+  - Flaskから情報を取得
+  - 心拍数と基準心拍数との差分からRPMを計算
+  - ステッピングモータを制御
+- Web UI
+  - ゲーム開始・停止
+  - ターン変更
+  - 心拍数表示
+  - 回転速度・回転方向表示
+  などを行っている
+
+プレイヤーは基本的にwatch1、watch2、watch3、watch4の4人を想定しています。
+
+---
+
+# 今回追加したい機能
+
+## 1. 妨害対象を自分で選択できるようにする
+
+各プレイヤーが、自分以外のプレイヤーを1人選んで妨害できるようにしてください。
+
+例えば、
+
+- watch1 → watch3を攻撃
+- watch2 → watch3を攻撃
+- watch3 → watch4を攻撃
+- watch4 → watch1を攻撃
+
+のような状態を保持したいです。
+
+Flask側では例えば以下のような形で管理できればよいです。
+
+python attack_targets = {     "watch1": None,     "watch2": None,     "watch3": None,     "watch4": None, } 
+
+watch1がwatch3を選択した場合は、
+
+python attack_targets["watch1"] = "watch3" 
+
+となるようにしてください。
+
+---
+
+## 2. 妨害対象を設定するAPIを追加する
+
+例えば、
+
+text POST /set_attack_target 
+
+のようなAPIを追加してください。
+
+送信データ例：
+
+json {   "attacker": "watch1",   "target": "watch3" } 
+
+条件として、
+
+- attacker自身をtargetにはできない
+- watch1〜watch4以外の値は受け付けない
+- 未設定状態に戻すこともできるようにする
+
+ようにしてください。
+
+また、現在の攻撃対象一覧を取得するAPIも追加してください。
+
+例：
+
+text GET /attack_targets 
+
+返却例：
+
+json {   "watch1": "watch3",   "watch2": "watch3",   "watch3": null,   "watch4": "watch1" } 
+
+---
+
+## 3. Web UIに妨害対象選択機能を追加する
+
+Web画面上で、各Watchについて妨害対象を選択できるようにしてください。
+
+イメージとしては、
+
+text watch1 の妨害対象 [ watch2 ▼ ]  watch2 の妨害対象 [ watch3 ▼ ] 
+
+のような選択UIで構いません。
+
+自分自身は選択肢から除外してください。
+
+例えばwatch1の場合、
+
+- watch2
+- watch3
+- watch4
+
+のみ選択可能としてください。
+
+選択すると /set_attack_target へ送信し、Flask側へ保存してください。
+
+---
+
+# 4. 現在のターンのプレイヤーを攻撃している人を取得する
+
+例えば現在のターンがwatch3の場合、
+
+python attackers = [     attacker     for attacker, target in attack_targets.items()     if target == "watch3" ] 
+
+のようにして、watch3を攻撃対象にしているプレイヤー一覧を取得してください。
+
+例：
+
+python attack_targets = {     "watch1": "watch3",     "watch2": "watch3",     "watch3": "watch4",     "watch4": "watch1" } 
+
+現在のターンがwatch3なら、
+
+python attackers = ["watch1", "watch2"] 
+
+となります。
+
+---
+
+# 5. 攻撃者の心拍数をモータ制御へ反映する
+
+現在のターンのプレイヤー本人ではなく、そのプレイヤーを攻撃対象として選択している人の心拍数を利用して回転速度を決定したいです。
+
+現在、他人モードでは以下のRPM計算を使用しています。
+
+python def calculate_other_rpm(diff):     ad = abs(diff)      if ad < 1:         return 10     elif ad < 10:         return 20     elif ad < 25:         return 30     else:         return 40 
+
+ここで、
+
+text diff = 現在心拍数 - ベースライン心拍数 
+
+です。
+
+攻撃者が1人の場合は、その攻撃者のdiffを利用してください。
+
+例えば、
+
+text 現在のターン：watch3 攻撃者：watch1 watch1のdiff：12 
+
+なら、
+
+text RPM = 30 
+
+になります。
+
+---
+
+# 6. 複数人が同じプレイヤーを攻撃した場合
+
+複数人が同じプレイヤーを攻撃対象としている場合があります。
+
+今回はまず「攻撃人数によって妨害効果を増幅する方式」で実装してください。
+
+例えば、
+
+text 攻撃者1人 → 1.0倍 攻撃者2人 → 1.5倍 攻撃者3人 → 2.0倍 
+
+とします。
+
+ただしRPM自体を単純に2倍するとモータ制御上危険になる可能性があるため、最終RPMは最大40rpmに制限してください。
+
+処理イメージ：
+
+python base_rpm = calculate_other_rpm(diff)  if attacker_count == 1:     multiplier = 1.0 elif attacker_count == 2:     multiplier = 1.5 elif attacker_count >= 3:     multiplier = 2.0 else:     multiplier = 1.0  rpm = min(base_rpm * multiplier, 40) 
+
+ただし、複数人のdiffのうちどれをbase_rpm計算に利用するかについては、
+
+text abs(diff)が最も大きい攻撃者 
+
+を採用してください。
+
+例：
+
+text watch1 diff = 6 watch2 diff = 18 
+
+の場合はwatch2の18を利用してbase_rpmを計算してください。
+
+---
+
+# 7. 攻撃者がいない場合
+
+現在のターンのプレイヤーを攻撃対象としている人が1人もいない場合は、妨害なし状態にしてください。
+
+例えば、
+
+text RPM = 10 
+
+または現在使用している通常時の処理へ戻してください。
+
+既存コードとの整合性を確認して、より自然な方を採用してください。
+
+---
+
+# 8. CSVログへ情報を追加する
+
+ゲーム終了後に分析できるように、現在保存しているCSVへ以下の情報も追加してください。
+
+追加候補：
+
+text attackers attack_target attack_count attack_active attack_source 
+
+例えば、
+
+csv time,current_turn,attackers,attack_count,attack_active,attack_source,rpm 12.3,watch3,"watch1|watch2",2,true,watch2,40 
+
+のようにしてください。
+
+attack_source は、複数人いる場合に実際のRPM計算に使用した、abs(diff)が最大のプレイヤーです。
+
+---
+
+# 9. 既存機能は壊さないでください
+
+今回の修正によって、以下の既存機能が動かなくならないようにしてください。
+
+- 心拍数取得
+- ベースライン取得
+- ゲーム開始・停止
+- ターン変更
+- Next / Prev
+- 回転速度制御
+- 回転方向制御
+- Web UIの心拍数表示
+- CSV保存
+- リセット
+- 接続Watch ID管理
+
+既存のコード構造をできる限り維持し、必要な部分だけを追加・変更してください。
+
+---
+
+# 10. 実装後に確認したい動作
+
+最低限、以下を確認できるようにしてください。
+
+### ケース1
+text 現在のターン：watch3 watch1 → watch3 
+
+watch1の心拍数によってwatch3のターン中のRPMが変化する。
+
+### ケース2
+text 現在のターン：watch3 watch1 → watch3 watch2 → watch3 
+
+2人から攻撃されているため、妨害効果が増幅される。
+
+### ケース3
+text 現在のターン：watch3 誰もwatch3を選択していない 
+
+妨害なし状態になる。
+
+### ケース4
+watch3のターンが終了してwatch4へ移った場合、watch3への妨害はモータ制御へ影響しなくなる。
+
+---
+
+まず現在のプロジェクト内のFlaskサーバ、Raspberry Pi側モータ制御、Web UIのコード構造を確認した上で、既存機能への影響が最小になる方法で実装してください。
+
+修正した箇所については、
+
+- どのファイルを変更したか
+- 何を追加したか
+- 既存処理をどのように変更したか
+- 動作確認方法
+
+も最後に説明してください。

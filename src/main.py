@@ -28,16 +28,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.abspath(os.path.join(BASE_DIR, 'heart_rates.json'))
 BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 CONTROL_FILE = "control_mode.json"
+ROTATION_SETTINGS_FILE = os.path.join(BASE_DIR, "rotation_settings.json")
+ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
 
 
 # -------------------------
 # 共通ヘルパー
 # -------------------------
-def save_json_file(filename, data):
+def save_json_file(filename, data, log=True):
     with file_lock:
         with open(filename, 'w') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"[ファイル書き込み] {filename} -> {data}")
+    if log:
+        print(f"[ファイル書き込み] {filename} -> {data}")
 
 def load_json_file(filename):
     with file_lock:
@@ -48,6 +51,19 @@ def load_json_file(filename):
                     return {}
                 return json.loads(content)
         return {}
+
+
+def load_rotation_settings():
+    settings = load_json_file(ROTATION_SETTINGS_FILE)
+    direction = settings.get("direction", "auto")
+    if direction not in {"auto", "c", "a"}:
+        direction = "auto"
+    hold = settings.get("hold", True)
+    return {"direction": direction, "hold": hold if isinstance(hold, bool) else True}
+
+
+def save_rotation_settings(settings):
+    save_json_file(ROTATION_SETTINGS_FILE, settings)
 
 
 @app.route('/start', methods=['POST'])
@@ -255,6 +271,83 @@ def get_control_mode():
             return jsonify(json.load(f))
     return jsonify({"mode": "self_fast"})
 
+
+@app.route('/get_rotation_settings')
+def get_rotation_settings():
+    return jsonify(load_rotation_settings())
+
+
+@app.route('/get_rotation_direction')
+def get_rotation_direction():
+    return jsonify({"direction": load_rotation_settings()["direction"]})
+
+
+@app.route('/set_rotation_direction', methods=['POST'])
+def set_rotation_direction():
+    data = request.get_json(silent=True) or {}
+    direction = data.get("direction")
+    if direction not in {"auto", "c", "a"}:
+        return jsonify({"status": "error", "message": "directionはauto、c、aのいずれかです"}), 400
+
+    settings = load_rotation_settings()
+    settings["direction"] = direction
+    save_rotation_settings(settings)
+    return jsonify({"status": "ok", "direction": direction})
+
+
+@app.route('/get_rotation_hold')
+def get_rotation_hold():
+    return jsonify({"hold": load_rotation_settings()["hold"]})
+
+
+@app.route('/get_rotation_status')
+def get_rotation_status():
+    return jsonify(load_json_file(ROTATION_STATUS_FILE))
+
+
+@app.route('/set_rotation_status', methods=['POST'])
+def set_rotation_status():
+    data = request.get_json(silent=True) or {}
+    motor_watch = data.get("motor_watch")
+    target_watch = data.get("target_watch")
+    mode = data.get("mode")
+
+    if not all(isinstance(value, str) and value for value in (motor_watch, target_watch, mode)):
+        return jsonify({"status": "error", "message": "motor_watch、target_watch、modeが必要です"}), 400
+
+    try:
+        rpm = float(data.get("rpm"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "rpmは数値で指定してください"}), 400
+
+    direction = data.get("direction")
+    if direction not in {"c", "a"}:
+        return jsonify({"status": "error", "message": "directionはcまたはaで指定してください"}), 400
+
+    status = load_json_file(ROTATION_STATUS_FILE)
+    status[motor_watch] = {
+        "target_watch": target_watch,
+        "mode": mode,
+        "rpm": rpm,
+        "direction": direction,
+    }
+    save_json_file(ROTATION_STATUS_FILE, status, log=False)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/set_rotation_hold', methods=['POST'])
+def set_rotation_hold():
+    data = request.get_json(silent=True) or {}
+    hold = data.get("hold")
+    if not isinstance(hold, bool):
+        return jsonify({"status": "error", "message": "holdはtrueまたはfalseで指定してください"}), 400
+
+    settings = load_rotation_settings()
+    settings["hold"] = hold
+    save_rotation_settings(settings)
+    return jsonify({"status": "ok", "hold": hold})
+
+
 @app.route("/set_control_mode", methods=["POST"])
 def set_control_mode():
     data = request.get_json()
@@ -265,7 +358,9 @@ def set_control_mode():
         "self_slow",
         "next_fast",
         "prev_fast",
-        "random_fast"
+        "random_fast",
+        "highest_diff",
+        "lowest_diff",
     }
 
     if mode not in allowed_modes:
