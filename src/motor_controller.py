@@ -5,6 +5,8 @@ import requests
 import threading
 import random
 
+from turn_condition_logic import TurnConditionLogic, compute_condition_diff
+
 # --------------------
 # 設定
 # --------------------
@@ -32,6 +34,10 @@ baseline_lock = threading.Lock()
 # randomモード用：各ターンの参照先を固定する
 random_target_map = {}
 random_target_lock = threading.Lock()
+
+# ターンごとの心拍条件状態
+turn_condition_states = {}
+turn_condition_lock = threading.Lock()
 
 # --------------------
 # GPIOセットアップ
@@ -256,6 +262,17 @@ def data_fetch_loop():
                 time.sleep(1)
                 continue
 
+            with turn_condition_lock:
+                if current_turn != last_turn:
+                    turn_condition_states.clear()
+                    turn_condition_states[current_turn] = TurnConditionLogic()
+                state = turn_condition_states.get(current_turn)
+
+            if state is None:
+                with turn_condition_lock:
+                    turn_condition_states[current_turn] = TurnConditionLogic()
+                state = turn_condition_states.get(current_turn)
+
             mode = get_control_mode()
 
             # 参照する心拍のwatchを決める
@@ -293,14 +310,21 @@ def data_fetch_loop():
                 time.sleep(1)
                 continue
 
-            diff = bpm - baseline
+            condition = state.choose_condition()
+            reference_bpm, diff, source = state.update(bpm, baseline, condition=condition)
 
-            if mode == "self_slow":
-                rpm = calculate_rpm_slow(diff)
+            if source == "switch":
+                print(f"[COND] {current_turn}: {condition}に切替 -> reference={reference_bpm:.1f}")
             else:
-                rpm = calculate_rpm_fast(diff)
+                print(f"[COND] {current_turn}: {condition} / source={source} / ref={reference_bpm:.1f}")
 
-            direction = calculate_direction(diff)
+            evaluation_diff = compute_condition_diff(bpm, reference_bpm, condition)
+            if mode == "self_slow":
+                rpm = calculate_rpm_slow(evaluation_diff)
+            else:
+                rpm = calculate_rpm_fast(evaluation_diff)
+
+            direction = calculate_direction(evaluation_diff)
 
             # ★回転させる対象は「今ターンの人」（プレイ中の人）
             with rotation_settings_lock:
@@ -308,7 +332,7 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
-            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, diff={diff:+.1f} -> rpm={rpm}, dir={direction}")
+            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}")
 
             time.sleep(1)
 
