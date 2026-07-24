@@ -5,14 +5,33 @@ import requests
 import threading
 import random
 
-from turn_condition_logic import TurnConditionLogic, compute_condition_diff
-
 # --------------------
 # 設定
 # --------------------
 motorPins = (18, 23, 24, 25)
 stepsPerRevolution = 2048
-MIN_STEPSPEED = 0.003
+
+# 実モータの速度調整値。小さいほどGPIO信号の待機時間が短くなり、速く回る。
+# モータが脱調する場合は MIN_STEP_DELAY を大きくする。
+MIN_STEP_DELAY = 0.003
+STEP_DELAY_MULTIPLIER = 4
+
+# 通常時の心拍差 -> RPM の対応表。
+# 各要素は (境界値, RPM, 境界を含めるか)。値はここだけ変更すればよい。
+FAST_RPM_TIERS = (
+    (3, 10, True),
+    (8, 20, False),
+    (15, 30, False),
+    (float("inf"), 40, False),
+)
+
+# self_slow モード用。心拍差が小さいほど高速になる逆転テーブル。
+SLOW_RPM_TIERS = (
+    (3, 40, False),
+    (8, 30, False),
+    (15, 20, False),
+    (float("inf"), 10, False),
+)
 
 API_HOST = 'http://192.168.100.26:8080'
 HEART_API_URL = f'{API_HOST}/heart_all'  # ★全watchの心拍を取得するAPI
@@ -21,9 +40,9 @@ TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
 
-# 妨害人数ごとの動作。値を変えるだけで演出を調整できる。
+# 妨害成功人数ごとの演出。通常RPMより優先して適用する。
+# rpm_steps は1秒ごとに順番に切り替わる。direction_interval が0なら毎回ランダム。
 ATTACK_PROFILES = {
-    0: {"rpm": 5, "direction": "normal"},
     1: {"rpm_steps": (5, 10, 15, 20, 25, 30), "direction": "normal"},
     2: {"rpm": 30, "direction": "random", "direction_interval": 5},
     3: {"rpm": 40, "direction": "random", "direction_interval": 0},
@@ -52,10 +71,6 @@ random_difference_mode_lock = threading.Lock()
 turn_start_heartbeats = {}
 turn_start_heartbeats_lock = threading.Lock()
 
-# ターンごとの心拍条件状態
-turn_condition_states = {}
-turn_condition_lock = threading.Lock()
-
 attack_direction_cache = {}
 attack_direction_lock = threading.Lock()
 
@@ -82,31 +97,23 @@ def rotary(direction, stepSpeed):
             sleep(stepSpeed)
 
 # --------------------
-# diff → RPM & 方向
+# 心拍差 -> RPM & 方向
 # --------------------
-def calculate_rpm_fast(diff):
-    ad = abs(diff)
+def rpm_from_tiers(abs_diff, tiers):
+    """絶対心拍差に対応するRPMを、上から順に境界テーブルで決める。"""
+    for upper_bound, rpm, inclusive in tiers:
+        if abs_diff <= upper_bound if inclusive else abs_diff < upper_bound:
+            return rpm
+    return tiers[-1][1]
 
-    if ad <= 3:
-        return 5
-    elif ad < 8:
-        return 10
-    elif ad < 15:
-        return 20
-    else:
-        return 30
+
+def calculate_rpm_fast(diff):
+    """通常モード用: 心拍差が大きいほど速く回す。"""
+    return rpm_from_tiers(abs(diff), FAST_RPM_TIERS)
 
 def calculate_rpm_slow(diff):
-    ad = abs(diff)
-
-    if ad < 3:
-        return 30
-    elif ad < 8:
-        return 20
-    elif ad < 15:
-        return 10
-    else:
-        return 5
+    """self_slow モード用: 心拍差が小さいほど速く回す。"""
+    return rpm_from_tiers(abs(diff), SLOW_RPM_TIERS)
 
 def calculate_direction(diff):
     """
@@ -220,7 +227,20 @@ def apply_attack_effect(current_turn, rpm, direction):
 
     return rpm, direction, attackers
 
-def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, extreme=None, attackers=None):
+def publish_rotation_status(
+    motor_watch,
+    target_watch,
+    mode,
+    rpm,
+    direction,
+    extreme=None,
+    attackers=None,
+    reference_bpm=None,
+    reference_source=None,
+    baseline_bpm=None,
+    reference_heartbeats=None,
+):
+    """画面表示用に、実際に回転判断で使った比較基準もサーバーへ送る。"""
     try:
         requests.post(
             f"{API_HOST}/set_rotation_status",
@@ -232,6 +252,10 @@ def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, ext
                 "direction": direction,
                 "extreme": extreme,
                 "attackers": attackers or [],
+                "reference_bpm": reference_bpm,
+                "reference_source": reference_source,
+                "baseline_bpm": baseline_bpm,
+                "reference_heartbeats": reference_heartbeats or {},
             },
             timeout=2,
         )
@@ -303,6 +327,9 @@ def get_difference_watch(current_turn, heart_data, largest, reference_heartbeats
             reference_heartbeats = dict(baseline_cache)
 
     for watch_id in get_watch_ids():
+        # 上昇・下降モードでは、手番本人の心拍は利用しない。
+        if watch_id == current_turn:
+            continue
         try:
             bpm = float(heart_data.get(watch_id, {}).get("heartbeat"))
             reference_bpm = float(reference_heartbeats[watch_id])
@@ -361,7 +388,8 @@ def data_fetch_loop():
 
             current_turn = get_current_turn()
             heart_data = get_heart_data()
-            # ターン変化ログ
+            # ターン変更時にだけ比較基準を固定する。
+            # 初ターンは各watchの平均値、2ターン目以降は交代時点の全watch心拍を使う。
             if current_turn != last_turn:
                 print(f"[TURN] {last_turn} -> {current_turn}")
 
@@ -396,21 +424,16 @@ def data_fetch_loop():
                 time.sleep(1)
                 continue
 
-            with turn_condition_lock:
-                if current_turn != last_turn:
-                    turn_condition_states.clear()
-                    turn_condition_states[current_turn] = TurnConditionLogic()
-                state = turn_condition_states.get(current_turn)
-
-            if state is None:
-                with turn_condition_lock:
-                    turn_condition_states[current_turn] = TurnConditionLogic()
-                state = turn_condition_states.get(current_turn)
-
             mode = get_control_mode()
             extreme = None
+            with baseline_lock:
+                baseline_references = dict(baseline_cache)
             with turn_start_heartbeats_lock:
-                extreme_reference = None if use_baseline_reference else dict(turn_start_heartbeats)
+                turn_references = dict(turn_start_heartbeats)
+
+            difference_mode = mode in {"highest_diff", "lowest_diff", "random_diff"}
+            comparison_references = baseline_references if use_baseline_reference else turn_references
+            comparison_source = "baseline" if use_baseline_reference else "turn_start"
 
             # 参照する心拍のwatchを決める
             if mode == "self_fast" or mode == "self_slow":
@@ -424,13 +447,13 @@ def data_fetch_loop():
             elif mode == "random_fast":
                 target_watch = get_random_watch(current_turn)
             elif mode == "highest_diff":
-                target_watch = get_difference_watch(current_turn, heart_data, largest=True, reference_heartbeats=extreme_reference)
+                target_watch = get_difference_watch(current_turn, heart_data, largest=True, reference_heartbeats=comparison_references)
                 extreme = "up"
             elif mode == "lowest_diff":
-                target_watch = get_difference_watch(current_turn, heart_data, largest=False, reference_heartbeats=extreme_reference)
+                target_watch = get_difference_watch(current_turn, heart_data, largest=False, reference_heartbeats=comparison_references)
                 extreme = "down"
             elif mode == "random_diff":
-                target_watch, largest = get_random_difference_watch(current_turn, heart_data, extreme_reference)
+                target_watch, largest = get_random_difference_watch(current_turn, heart_data, comparison_references)
                 extreme = "up" if largest else "down"
             else:
                 target_watch = current_turn
@@ -447,26 +470,18 @@ def data_fetch_loop():
             except (ValueError, TypeError):
                 bpm = 0
 
-            # baselineは「参照する心拍のwatch」に合わせる（★重要）
-            with baseline_lock:
-                baseline = baseline_cache.get(target_watch)
-
-            if baseline is None:
+            baseline = baseline_references.get(target_watch)
+            reference_bpm = comparison_references.get(target_watch) if difference_mode else baseline
+            if baseline is None or reference_bpm is None:
                 print(f"[WARN] baseline無し: target={target_watch} （モーター停止）")
                 with rotation_settings_lock:
                     rotation_settings.clear()
                 time.sleep(1)
                 continue
 
-            condition = state.choose_condition()
-            reference_bpm, diff, source = state.update(bpm, baseline, condition=condition)
-
-            if source == "switch":
-                print(f"[COND] {current_turn}: {condition}に切替 -> reference={reference_bpm:.1f}")
-            else:
-                print(f"[COND] {current_turn}: {condition} / source={source} / ref={reference_bpm:.1f}")
-
-            evaluation_diff = compute_condition_diff(bpm, reference_bpm, condition)
+            # ターン中に比較基準は更新しない。上昇・下降モードは採用方向だけで符号を決める。
+            raw_diff = bpm - reference_bpm
+            evaluation_diff = raw_diff if extreme != "down" else -raw_diff
             if mode == "self_slow":
                 rpm = calculate_rpm_slow(evaluation_diff)
             else:
@@ -481,8 +496,22 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
-            publish_rotation_status(current_turn, target_watch, mode, rpm, direction, extreme, attackers)
-            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}, attackers={attackers}")
+            # 差分モードでは交代時の固定心拍、その他では平均値を画面に渡す。
+            displayed_references = comparison_references if difference_mode else baseline_references
+            publish_rotation_status(
+                current_turn,
+                target_watch,
+                mode,
+                rpm,
+                direction,
+                extreme,
+                attackers,
+                reference_bpm,
+                comparison_source if difference_mode else "baseline",
+                baseline,
+                displayed_references,
+            )
+            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}, attackers={attackers}")
 
             time.sleep(1)
 
@@ -509,10 +538,12 @@ def rotation_loop():
             print("[ROT] items:", items)  # ★これ追加
 
             for device_id, (rpm, direction) in items:
-                stepSpeed = (60 / rpm) / stepsPerRevolution
-                safe_stepSpeed = max(stepSpeed * 4, MIN_STEPSPEED)
-                print(f"[ROT] run {device_id} rpm={rpm} dir={direction} step={safe_stepSpeed:.5f}")  # ★これ追加
-                rotary(direction, safe_stepSpeed)
+                # RPMを1ステップごとの待機時間へ変換する。
+                # STEP_DELAY_MULTIPLIER と MIN_STEP_DELAY は実機の回転感・安定性を調整する値。
+                step_delay = (60 / rpm) / stepsPerRevolution
+                safe_step_delay = max(step_delay * STEP_DELAY_MULTIPLIER, MIN_STEP_DELAY)
+                print(f"[ROT] run {device_id} rpm={rpm} dir={direction} step={safe_step_delay:.5f}")  # ★これ追加
+                rotary(direction, safe_step_delay)
 
         except KeyboardInterrupt:
             GPIO.cleanup()

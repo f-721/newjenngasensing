@@ -248,6 +248,16 @@ select {
   overflow-y: auto;
 }
 
+.comparison-reference {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 4px solid #42a5f5;
+  background: #eef7ff;
+  font-weight: bold;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
 #rate div,
 #max-rate div {
   font-size: 1.1em !important;
@@ -879,6 +889,21 @@ async function refreshCurrentTarget() {
       const selectedExtreme = extreme ? ` / 採用: ${extreme}` : '';
       usedEl.innerText = `利用中の心拍: ${target || '未設定'}${selectedExtreme} / 回転速度: ${speed} / 回転方向: ${direction}`;
     }
+    const referenceEl = document.getElementById('comparison-reference');
+    if (referenceEl) {
+      const references = info.reference_heartbeats || {};
+      const sourceLabel = info.reference_source === 'turn_start' ? 'ターン交代時の心拍' : '平均値';
+      const lines = Object.entries(references)
+        .filter(([watchId]) => watchId !== current)
+        .sort(([firstWatch], [secondWatch]) => firstWatch.localeCompare(secondWatch))
+        .map(([watchId, heartbeat]) => {
+          const bpm = Number(heartbeat);
+          return Number.isFinite(bpm) ? `${watchId}: ${Math.round(bpm)} BPM` : `${watchId}: 未設定`;
+        });
+      referenceEl.innerText = lines.length
+        ? `比較の参考心拍 (${sourceLabel})\n${lines.join('\n')}`
+        : '比較の参考心拍: 未設定';
+    }
     const attackEl = document.getElementById('attack-status');
     if (attackEl) {
       const attackRes = await fetch('/attack_status');
@@ -1488,6 +1513,7 @@ async function resetGameOnly() {
           <div>
             <h3>最大心拍数</h3>
             <div id="max-rate"><p>最大心拍数を記録中...</p></div>
+            <div id="comparison-reference" class="comparison-reference">比較の参考心拍: 未設定</div>
           </div>
         </div>
       </div>

@@ -5,6 +5,7 @@ import threading
 import csv
 import time  # ← CSV保存に必要
 import random
+import tempfile
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from heart_api import heart_api
@@ -56,9 +57,15 @@ ATTACK_CHALLENGE_RULES = {
 # 共通ヘルパー
 # -------------------------
 def save_json_file(filename, data, log=True):
+    """Write JSON atomically so a stopped process cannot leave a truncated state file."""
     with file_lock:
-        with open(filename, 'w') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        directory = os.path.dirname(os.path.abspath(filename))
+        with tempfile.NamedTemporaryFile(mode='w', dir=directory, delete=False) as temporary_file:
+            temporary_path = temporary_file.name
+            json.dump(data, temporary_file, ensure_ascii=False, indent=2)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, filename)
     if log:
         print(f"[ファイル書き込み] {filename} -> {data}")
 
@@ -583,6 +590,33 @@ def set_rotation_status():
     if not isinstance(attackers, list) or not all(isinstance(attacker, str) for attacker in attackers):
         return jsonify({"status": "error", "message": "attackersはwatch IDの配列で指定してください"}), 400
 
+    def optional_number(field_name):
+        value = data.get(field_name)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError(field_name)
+
+    try:
+        reference_bpm = optional_number("reference_bpm")
+        baseline_bpm = optional_number("baseline_bpm")
+    except ValueError as error:
+        return jsonify({"status": "error", "message": f"{error.args[0]}は数値で指定してください"}), 400
+
+    reference_source = data.get("reference_source")
+    if reference_source not in {None, "baseline", "turn_start"}:
+        return jsonify({"status": "error", "message": "reference_sourceが不正です"}), 400
+
+    reference_heartbeats = data.get("reference_heartbeats", {})
+    if not isinstance(reference_heartbeats, dict):
+        return jsonify({"status": "error", "message": "reference_heartbeatsはwatchごとの心拍数で指定してください"}), 400
+    try:
+        reference_heartbeats = {watch_id: float(heartbeat) for watch_id, heartbeat in reference_heartbeats.items()}
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "reference_heartbeatsの心拍数は数値で指定してください"}), 400
+
     status = load_json_file(ROTATION_STATUS_FILE)
     status[motor_watch] = {
         "target_watch": target_watch,
@@ -592,6 +626,10 @@ def set_rotation_status():
         "extreme": extreme,
         "attackers": attackers,
         "attack_count": len(attackers),
+        "reference_bpm": reference_bpm,
+        "reference_source": reference_source,
+        "baseline_bpm": baseline_bpm,
+        "reference_heartbeats": reference_heartbeats,
     }
     save_rotation_status(status)
     record_csv_snapshot(target_watch, mode, rpm, direction, extreme)
@@ -637,8 +675,9 @@ def set_control_mode():
     assigned_ids = load_json_file(ASSIGNED_FILE)
     watch_ids = set(assigned_ids.values())
 
-    # 他人参照モードは2台以上必要
-    if mode in {"next_fast", "prev_fast", "random_fast"} and len(watch_ids) < 2:
+    # 他人の心拍を利用するモードは2台以上必要
+    other_watch_modes = {"next_fast", "prev_fast", "random_fast", "highest_diff", "lowest_diff", "random_diff"}
+    if mode in other_watch_modes and len(watch_ids) < 2:
         return jsonify({
             "status": "error",
             "message": "このモードは2台以上接続されていないと使用できません"
