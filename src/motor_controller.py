@@ -35,6 +35,14 @@ baseline_lock = threading.Lock()
 random_target_map = {}
 random_target_lock = threading.Lock()
 
+# 上昇・下降をターンごとにランダム選択するための状態
+random_difference_mode_map = {}
+random_difference_mode_lock = threading.Lock()
+
+# 2ターン目以降の上昇・下降比較に使うターン開始時の心拍
+turn_start_heartbeats = {}
+turn_start_heartbeats_lock = threading.Lock()
+
 # ターンごとの心拍条件状態
 turn_condition_states = {}
 turn_condition_lock = threading.Lock()
@@ -67,8 +75,8 @@ def rotary(direction, stepSpeed):
 def calculate_rpm_fast(diff):
     ad = abs(diff)
 
-    if ad < 3:
-        return 0
+    if ad <= 3:
+        return 5
     elif ad < 8:
         return 10
     elif ad < 15:
@@ -162,7 +170,7 @@ def get_control_mode():
     except:
         return "self"
 
-def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction):
+def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, extreme=None):
     try:
         requests.post(
             f"{API_HOST}/set_rotation_status",
@@ -172,6 +180,7 @@ def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction):
                 "mode": mode,
                 "rpm": rpm,
                 "direction": direction,
+                "extreme": extreme,
             },
             timeout=2,
         )
@@ -235,28 +244,36 @@ def get_random_watch(current_turn):
         print(f"[RANDOM TARGET] {current_turn} -> {target}")
         return target
 
-def get_difference_watch(current_turn, heart_data, largest):
+def get_difference_watch(current_turn, heart_data, largest, reference_heartbeats=None):
     candidates = []
 
-    with baseline_lock:
-        baselines = dict(baseline_cache)
+    if reference_heartbeats is None:
+        with baseline_lock:
+            reference_heartbeats = dict(baseline_cache)
 
     for watch_id in get_watch_ids():
-        if watch_id == current_turn:
-            continue
-
         try:
             bpm = float(heart_data.get(watch_id, {}).get("heartbeat"))
-            baseline = float(baselines[watch_id])
+            reference_bpm = float(reference_heartbeats[watch_id])
         except (KeyError, TypeError, ValueError):
             continue
 
-        candidates.append((abs(bpm - baseline), watch_id))
+        candidates.append((bpm - reference_bpm, watch_id))
 
     if not candidates:
         return None
 
     return (max if largest else min)(candidates)[1]
+
+def get_random_difference_watch(current_turn, heart_data, reference_heartbeats=None):
+    with random_difference_mode_lock:
+        largest = random_difference_mode_map.get(current_turn)
+        if largest is None:
+            largest = random.choice([True, False])
+            random_difference_mode_map[current_turn] = largest
+            print(f"[RANDOM EXTREME] {current_turn} -> {'上昇' if largest else '下降'}")
+
+    return get_difference_watch(current_turn, heart_data, largest, reference_heartbeats), largest
 
 # --------------------
 # データ取得スレッド
@@ -264,6 +281,8 @@ def get_difference_watch(current_turn, heart_data, largest):
 def data_fetch_loop():
     last_turn = None
     last_info = 0
+    first_turn = True
+    use_baseline_reference = True
 
     while True:
         try:
@@ -271,6 +290,12 @@ def data_fetch_loop():
             if not running:
                 with rotation_settings_lock:
                     rotation_settings.clear()
+
+                last_turn = None
+                first_turn = True
+                use_baseline_reference = True
+                with turn_start_heartbeats_lock:
+                    turn_start_heartbeats.clear()
 
                 # ★追加：2秒に1回だけ表示（うるさくしない）
                 if time.time() - last_info > 2:
@@ -293,6 +318,25 @@ def data_fetch_loop():
                     if last_turn in random_target_map:
                         del random_target_map[last_turn]
 
+                with random_difference_mode_lock:
+                    if last_turn in random_difference_mode_map:
+                        del random_difference_mode_map[last_turn]
+
+                use_baseline_reference = first_turn
+                if first_turn:
+                    first_turn = False
+                else:
+                    snapshot = {}
+                    for watch_id, record in heart_data.items():
+                        try:
+                            snapshot[watch_id] = float(record.get("heartbeat"))
+                        except (AttributeError, TypeError, ValueError):
+                            continue
+                    with turn_start_heartbeats_lock:
+                        turn_start_heartbeats.clear()
+                        turn_start_heartbeats.update(snapshot)
+                    print(f"[TURN REFERENCE] {current_turn}: {snapshot}")
+
                 last_turn = current_turn
 
             if not current_turn or current_turn not in heart_data:
@@ -313,6 +357,9 @@ def data_fetch_loop():
                 state = turn_condition_states.get(current_turn)
 
             mode = get_control_mode()
+            extreme = None
+            with turn_start_heartbeats_lock:
+                extreme_reference = None if use_baseline_reference else dict(turn_start_heartbeats)
 
             # 参照する心拍のwatchを決める
             if mode == "self_fast" or mode == "self_slow":
@@ -324,9 +371,14 @@ def data_fetch_loop():
             elif mode == "random_fast":
                 target_watch = get_random_watch(current_turn)
             elif mode == "highest_diff":
-                target_watch = get_difference_watch(current_turn, heart_data, largest=True)
+                target_watch = get_difference_watch(current_turn, heart_data, largest=True, reference_heartbeats=extreme_reference)
+                extreme = "up"
             elif mode == "lowest_diff":
-                target_watch = get_difference_watch(current_turn, heart_data, largest=False)
+                target_watch = get_difference_watch(current_turn, heart_data, largest=False, reference_heartbeats=extreme_reference)
+                extreme = "down"
+            elif mode == "random_diff":
+                target_watch, largest = get_random_difference_watch(current_turn, heart_data, extreme_reference)
+                extreme = "up" if largest else "down"
             else:
                 target_watch = current_turn
 
@@ -375,7 +427,7 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
-            publish_rotation_status(current_turn, target_watch, mode, rpm, direction)
+            publish_rotation_status(current_turn, target_watch, mode, rpm, direction, extreme)
             print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}")
 
             time.sleep(1)

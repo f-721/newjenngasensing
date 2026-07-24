@@ -394,7 +394,7 @@ select {
 
     async function fetchHeartRate() {
       try {
-        const res = await fetch('/heart');
+        const res = await fetch('/heart_all');
         const text = await res.text();
         let data = {};
         try {
@@ -862,12 +862,15 @@ async function refreshCurrentTarget() {
     const rpm = Number.isFinite(Number(info.rpm)) ? Number(info.rpm) : null;
     const directionNames = { c: '時計回り', a: '反時計回り' };
     const direction = directionNames[info.direction] || '未設定';
+    const extremeNames = { up: '基準より最も上昇', down: '基準より最も下降' };
+    const extreme = extremeNames[info.extreme] || '';
 
     document.getElementById('current-target').innerText = `利用対象: ${target || '未設定'}`;
     const usedEl = document.getElementById('current-used');
     if (usedEl) {
       const speed = rpm === null ? '未設定' : `${rpm} rpm`;
-      usedEl.innerText = `利用中の心拍: ${target || '未設定'} / 回転速度: ${speed} / 回転方向: ${direction}`;
+      const selectedExtreme = extreme ? ` / 採用: ${extreme}` : '';
+      usedEl.innerText = `利用中の心拍: ${target || '未設定'}${selectedExtreme} / 回転速度: ${speed} / 回転方向: ${direction}`;
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
@@ -1140,8 +1143,9 @@ function getModeLabel(mode) {
     next_fast: "他人の心拍（次の人）",
     prev_fast: "他人の心拍（前の人）",
     random_fast: "他人の心拍（ランダム）",
-    highest_diff: "差分が一番大きい人",
-    lowest_diff: "差分が一番小さい人"
+    highest_diff: "基準値より最も上がった人",
+    lowest_diff: "基準値より最も下がった人",
+    random_diff: "上昇・下降をターンごとランダム"
   };
   return modeNames[mode] || mode;
 }
@@ -1301,7 +1305,7 @@ async function loadCurrentMode() {
 }
 
 async function resetGameOnly() {
-  if (!confirm("次のゲーム用に心拍データだけリセットしますか？")) return;
+  if (!confirm("前回ゲームのCSVデータだけを消去しますか？")) return;
 
   try {
     const res = await fetch("/reset_game", { method: "POST" });
@@ -1399,10 +1403,11 @@ async function resetGameOnly() {
           </div>
 
           <div class="mode-group other-group">
-            <div class="mode-group-title">差分の極値を使う</div>
-            <button class="mode-btn other-btn" onclick="setMode('highest_diff')">差分が一番大きい人</button>
-            <button class="mode-btn other-btn" onclick="setMode('lowest_diff')">差分が一番小さい人</button>
-            <div class="mode-note">基準との差分を見て、回転対象を自動選択</div>
+            <div class="mode-group-title">上昇・下降を使う</div>
+            <button class="mode-btn other-btn" onclick="setMode('highest_diff')">基準値より最も上がった人</button>
+            <button class="mode-btn other-btn" onclick="setMode('lowest_diff')">基準値より最も下がった人</button>
+            <button class="mode-btn other-btn" onclick="setMode('random_diff')">上昇・下降をターンごとランダム</button>
+            <div class="mode-note">1ターン目は基準値、以後はターン開始時の心拍から比較</div>
           </div>
 
           <div class="mode-group compact-rotation">

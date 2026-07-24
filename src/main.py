@@ -4,6 +4,7 @@ import json
 import threading
 import csv
 import time  # ← CSV保存に必要
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from heart_api import heart_api
 from turn_api import turn_api
@@ -30,6 +31,14 @@ BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 CONTROL_FILE = "control_mode.json"
 ROTATION_SETTINGS_FILE = os.path.join(BASE_DIR, "rotation_settings.json")
 ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
+ATTACK_TARGETS_FILE = os.path.join(BASE_DIR, "attack_targets.json")
+CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
+CSV_COLUMNS = [
+    "timestamp", "device_id", "heartbeat", "baseline", "diff", "abs_diff",
+    "game_phase", "current_turn", "control_mode", "random_extreme",
+    "target_watch", "is_target", "rpm", "direction", "source_timestamp", "collapse",
+]
+CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
 
 
 # -------------------------
@@ -66,8 +75,81 @@ def save_rotation_settings(settings):
     save_json_file(ROTATION_SETTINGS_FILE, settings)
 
 
+def save_rotation_status(status):
+    save_json_file(ROTATION_STATUS_FILE, status, log=False)
+
+
+def load_csv_history():
+    history = load_json_file(CSV_HISTORY_FILE)
+    if isinstance(history, list):
+        return history
+    if isinstance(history, dict) and isinstance(history.get("rows"), list):
+        return history["rows"]
+    return []
+
+
+def format_csv_value(column, value):
+    if column not in CSV_INTEGER_COLUMNS or value in {"", None}:
+        return value
+    try:
+        return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
+        return value
+
+
+def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None):
+    if not load_json_file(GAME_STATUS_FILE).get("running", False):
+        return
+
+    heart_data = load_json_file(DATA_FILE)
+    baselines = load_json_file(BASELINE_FILE)
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    timestamp = int(time.time() * 1000)
+    rows = []
+
+    for device_id, records in sorted(heart_data.items()):
+        if not records:
+            continue
+        latest = records[-1]
+        heartbeat = latest.get("heartbeat")
+        baseline = baselines.get(device_id, "")
+        try:
+            diff = float(heartbeat) - float(baseline)
+            abs_diff = abs(diff)
+        except (TypeError, ValueError):
+            diff = abs_diff = ""
+
+        rows.append({
+            "timestamp": timestamp, "device_id": device_id, "heartbeat": heartbeat,
+            "baseline": baseline, "diff": diff, "abs_diff": abs_diff,
+            "game_phase": "playing", "current_turn": current_turn or "",
+            "control_mode": mode,
+            "random_extreme": {"up": "上昇", "down": "下降"}.get(extreme, "") if mode == "random_diff" else "",
+            "target_watch": target_watch, "is_target": device_id == target_watch,
+            "rpm": rpm, "direction": direction,
+            "source_timestamp": latest.get("timestamp", ""), "collapse": "",
+        })
+
+    if rows:
+        history = load_csv_history()
+        history.extend(rows)
+        save_json_file(CSV_HISTORY_FILE, history, log=False)
+
+
+def load_attack_targets():
+    targets = load_json_file(ATTACK_TARGETS_FILE)
+    return targets if isinstance(targets, dict) else {}
+
+
+def save_attack_targets(targets):
+    save_json_file(ATTACK_TARGETS_FILE, targets, log=False)
+
+
 @app.route('/start', methods=['POST'])
 def start_game():
+    if load_csv_history():
+        return jsonify({"status": "error", "message": "前回ゲームのCSVデータが残っています。「ゲームだけリセット」でCSVデータを消去してください"}), 400
+
     assigned_ids = load_json_file(ASSIGNED_FILE)      # {"ip":"watch1", ...}
     baseline_data = load_json_file(BASELINE_FILE)     # {"watch1": 68.2, ...}
 
@@ -153,6 +235,7 @@ def get_game_status():
 @app.route('/reset', methods=['POST'])
 def reset_server():
     save_json_file(DATA_FILE, {})
+    save_json_file(CSV_HISTORY_FILE, [], log=False)
     save_json_file(GAME_STATUS_FILE, {
         "running": False,
         "game_over": False,
@@ -168,6 +251,12 @@ def reset_server():
         "status": "ok",
         "message": "サーバーを完全リセットしました"
     })
+
+
+@app.route('/reset_game', methods=['POST'])
+def reset_game_only():
+    save_json_file(CSV_HISTORY_FILE, [], log=False)
+    return jsonify({"status": "ok", "message": "CSVデータを消去しました"})
 
 @app.route("/assign_id")
 def assign_id():
@@ -238,8 +327,9 @@ def export_csv():
     if game_status.get("running", True):
         return jsonify({"status": "error", "message": "ゲーム終了後のみCSV保存可能です"}), 403
 
-    # 保存するデータを読み込み
-    data = load_json_file(DATA_FILE)  # ← ここが保存対象のJSON
+    history = load_csv_history()
+    if not history:
+        return jsonify({"status": "error", "message": "保存するCSVデータがありません"}), 400
 
     # ファイル名生成と保存先フォルダ
     timestamp = int(time.time())
@@ -247,17 +337,11 @@ def export_csv():
     filepath = os.path.join("data", filename)
     os.makedirs("data", exist_ok=True)
 
-    # 書き込み処理（device_id, timestamp, heartbeat）
-    with open(filepath, mode='w', newline='') as csvfile:
+    with open(filepath, mode='w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['device_id', 'timestamp', 'heartbeat'])  # ヘッダー行
-        for device_id, records in data.items():
-            for record in records:
-                writer.writerow([
-                    device_id,
-                    record.get('timestamp', ''),
-                    record.get('heartbeat', '')
-                ])
+        writer.writerow(CSV_COLUMNS)
+        for row in history:
+            writer.writerow([format_csv_value(column, row.get(column, "")) for column in CSV_COLUMNS])
 
     print(f"[CSV保存] {filepath} に保存されました")
 
@@ -324,14 +408,20 @@ def set_rotation_status():
     if direction not in {"c", "a"}:
         return jsonify({"status": "error", "message": "directionはcまたはaで指定してください"}), 400
 
+    extreme = data.get("extreme")
+    if extreme not in {None, "up", "down"}:
+        return jsonify({"status": "error", "message": "extremeはupまたはdownで指定してください"}), 400
+
     status = load_json_file(ROTATION_STATUS_FILE)
     status[motor_watch] = {
         "target_watch": target_watch,
         "mode": mode,
         "rpm": rpm,
         "direction": direction,
+        "extreme": extreme,
     }
-    save_json_file(ROTATION_STATUS_FILE, status, log=False)
+    save_rotation_status(status)
+    record_csv_snapshot(target_watch, mode, rpm, direction, extreme)
     return jsonify({"status": "ok"})
 
 
@@ -361,6 +451,7 @@ def set_control_mode():
         "random_fast",
         "highest_diff",
         "lowest_diff",
+        "random_diff",
     }
 
     if mode not in allowed_modes:
@@ -388,6 +479,40 @@ def set_control_mode():
         "mode": mode,
         "message": f"{mode} に変更しました"
     })
+
+
+@app.route('/attack_targets')
+def get_attack_targets():
+    return jsonify(load_attack_targets())
+
+
+@app.route('/set_attack_target', methods=['POST'])
+def set_attack_target():
+    data = request.get_json(silent=True) or {}
+    attacker = data.get("attacker")
+    target = data.get("target")
+    valid_watches = {f"watch{number}" for number in range(1, 5)}
+    if attacker not in valid_watches or (target is not None and target not in valid_watches) or attacker == target:
+        return jsonify({"status": "error", "message": "不正な攻撃対象です"}), 400
+    targets = load_attack_targets()
+    targets[attacker] = target
+    save_attack_targets(targets)
+    return jsonify({"status": "ok", "attacker": attacker, "target": target})
+
+
+@app.route('/current_attackers')
+def get_current_attackers():
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
+    return jsonify({"current_turn": current_turn, "attackers": attackers, "attack_count": len(attackers)})
+
+
+@app.route('/attack_status')
+def get_attack_status():
+    game_status = load_json_file(GAME_STATUS_FILE)
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
+    return jsonify({"round": game_status.get("round"), "current_turn": current_turn, "attackers": attackers})
 
 @app.route('/get_heart_data', methods=['GET'])
 def get_heart_data():
