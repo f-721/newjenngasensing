@@ -1,17 +1,23 @@
 {
   "watch1": {
-    "target_watch": "watch2",
-    "mode": "random_diff",
+    "target_watch": "watch1",
+    "mode": "attack_challenge",
     "rpm": 5.0,
     "direction": "c",
-    "extreme": "down"
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0
   },
   "watch2": {
     "target_watch": "watch2",
-    "mode": "random_diff",
-    "rpm": 5.0,
+    "mode": "attack_challenge",
+    "rpm": 25.0,
     "direction": "c",
-    "extreme": "up"
+    "extreme": null,
+    "attackers": [
+      "watch1"
+    ],
+    "attack_count": 1
   },
   "watch3": {
     "target_watch": "watch3",

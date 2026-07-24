@@ -763,6 +763,16 @@ def get_attack_status():
         attacker: attack_threshold(attacker, condition)
         for attacker in pending_attackers
     } if condition else {}
+    heartbeats = get_latest_heartbeats()
+    challenge_requirements = {
+        watch_id: {
+            "heartbeat": heartbeats.get(watch_id),
+            "threshold": attack_threshold(watch_id, condition),
+            "status": "達成" if watch_id in attackers else "挑戦中" if watch_id in pending_attackers else "未挑戦",
+        }
+        for watch_id in sorted(set(load_json_file(ASSIGNED_FILE).values()))
+        if watch_id != current_turn
+    }
     return jsonify({
         "round": game_status.get("round"),
         "current_turn": current_turn,
@@ -771,6 +781,7 @@ def get_attack_status():
         "attack_mode": mode == "attack_challenge",
         "challenge_direction": condition.get("direction") if condition else None,
         "pending_thresholds": thresholds,
+        "challenge_requirements": challenge_requirements,
     })
 
 @app.route('/get_heart_data', methods=['GET'])

@@ -71,6 +71,12 @@ h2, h3 {
   font-size: 0.9em;
 }
 
+#attack-status {
+  white-space: pre-line;
+  text-align: left;
+  line-height: 1.55;
+}
+
 .compact-grid {
   display: block;
   gap: 12px;
@@ -880,14 +886,30 @@ async function refreshCurrentTarget() {
       const activeAttackers = Array.isArray(attackData.attackers) ? attackData.attackers : attackers;
       const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
       const conditionNames = { up: '上昇', down: '下降' };
-      const activeText = activeAttackers.length ? `成功 ${activeAttackers.length}台 (${activeAttackers.join(', ')})` : '成功 なし';
-      const pendingLabels = pending.map((attacker) => {
-        const threshold = Number(attackData.pending_thresholds?.[attacker]);
-        return Number.isFinite(threshold) ? `${attacker}: ${Math.round(threshold)} bpm` : attacker;
+      if (!attackData.attack_mode) {
+        attackEl.innerText = activeAttackers.length
+          ? `妨害情報：現在参加 ${activeAttackers.join(', ')} (${activeAttackers.length}台)`
+          : '妨害情報：現在参加 なし (0台)';
+        return;
+      }
+
+      const participants = [...new Set([...activeAttackers, ...pending])];
+      const requirements = attackData.challenge_requirements || {};
+      const participantLines = participants.map((watchId) => {
+        const requirement = requirements[watchId] || {};
+        const threshold = Number(requirement.threshold);
+        const heartbeat = Number(requirement.heartbeat);
+        const target = Number.isFinite(threshold) ? `${Math.round(threshold)} BPM` : '未設定';
+        const current = Number.isFinite(heartbeat) ? `現在 ${Math.round(heartbeat)} BPM / ` : '';
+        const status = requirement.status || (activeAttackers.includes(watchId) ? '達成' : '挑戦中');
+        return `${watchId}：${current}ノルマ ${target} / ${status}`;
       });
-      const pendingText = pending.length ? ` / 保留 ${pending.length}台 (${pendingLabels.join(', ')})` : '';
-      const conditionText = attackData.attack_mode ? ` / 条件: ${conditionNames[attackData.challenge_direction] || '未設定'}` : '';
-      attackEl.innerText = `妨害受信: ${activeText}${pendingText}${conditionText}`;
+      const participantText = participants.length ? participants.join(', ') : 'なし';
+      attackEl.innerText = [
+        `妨害情報：現在参加 ${participantText} (${participants.length}台)`,
+        `条件：${conditionNames[attackData.challenge_direction] || '未設定'}`,
+        ...participantLines,
+      ].join('\n');
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
