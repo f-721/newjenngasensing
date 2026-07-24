@@ -864,6 +864,7 @@ async function refreshCurrentTarget() {
     const direction = directionNames[info.direction] || '未設定';
     const extremeNames = { up: '基準より最も上昇', down: '基準より最も下降' };
     const extreme = extremeNames[info.extreme] || '';
+    const attackers = Array.isArray(info.attackers) ? info.attackers : [];
 
     document.getElementById('current-target').innerText = `利用対象: ${target || '未設定'}`;
     const usedEl = document.getElementById('current-used');
@@ -871,6 +872,22 @@ async function refreshCurrentTarget() {
       const speed = rpm === null ? '未設定' : `${rpm} rpm`;
       const selectedExtreme = extreme ? ` / 採用: ${extreme}` : '';
       usedEl.innerText = `利用中の心拍: ${target || '未設定'}${selectedExtreme} / 回転速度: ${speed} / 回転方向: ${direction}`;
+    }
+    const attackEl = document.getElementById('attack-status');
+    if (attackEl) {
+      const attackRes = await fetch('/attack_status');
+      const attackData = await attackRes.json();
+      const activeAttackers = Array.isArray(attackData.attackers) ? attackData.attackers : attackers;
+      const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
+      const conditionNames = { up: '上昇', down: '下降' };
+      const activeText = activeAttackers.length ? `成功 ${activeAttackers.length}台 (${activeAttackers.join(', ')})` : '成功 なし';
+      const pendingLabels = pending.map((attacker) => {
+        const threshold = Number(attackData.pending_thresholds?.[attacker]);
+        return Number.isFinite(threshold) ? `${attacker}: ${Math.round(threshold)} bpm` : attacker;
+      });
+      const pendingText = pending.length ? ` / 保留 ${pending.length}台 (${pendingLabels.join(', ')})` : '';
+      const conditionText = attackData.attack_mode ? ` / 条件: ${conditionNames[attackData.challenge_direction] || '未設定'}` : '';
+      attackEl.innerText = `妨害受信: ${activeText}${pendingText}${conditionText}`;
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
@@ -1145,7 +1162,8 @@ function getModeLabel(mode) {
     random_fast: "他人の心拍（ランダム）",
     highest_diff: "基準値より最も上がった人",
     lowest_diff: "基準値より最も下がった人",
-    random_diff: "上昇・下降をターンごとランダム"
+    random_diff: "上昇・下降をターンごとランダム",
+    attack_challenge: "妨害チャレンジ"
   };
   return modeNames[mode] || mode;
 }
@@ -1408,6 +1426,8 @@ async function resetGameOnly() {
             <button class="mode-btn other-btn" onclick="setMode('lowest_diff')">基準値より最も下がった人</button>
             <button class="mode-btn other-btn" onclick="setMode('random_diff')">上昇・下降をターンごとランダム</button>
             <div class="mode-note">1ターン目は基準値、以後はターン開始時の心拍から比較</div>
+            <button class="mode-btn other-btn" onclick="setMode('attack_challenge')">妨害チャレンジ</button>
+            <div class="mode-note">妨害信号後、上昇・下降の心拍条件を満たすと妨害成功</div>
           </div>
 
           <div class="mode-group compact-rotation">
@@ -1441,6 +1461,7 @@ async function resetGameOnly() {
             <h3>現在の心拍数</h3>
             <div id="rate"><p>読み込み中...</p></div>
             <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
+            <div id="attack-status" class="current-used">妨害受信: なし</div>
           </div>
           <div>
             <h3>最大心拍数</h3>

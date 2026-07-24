@@ -19,6 +19,15 @@ HEART_API_URL = f'{API_HOST}/heart_all'  # ★全watchの心拍を取得するAP
 STATUS_API_URL = f'{API_HOST}/status'
 TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
+ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
+
+# 妨害人数ごとの動作。値を変えるだけで演出を調整できる。
+ATTACK_PROFILES = {
+    0: {"rpm": 5, "direction": "normal"},
+    1: {"rpm_steps": (5, 10, 15, 20, 25, 30), "direction": "normal"},
+    2: {"rpm": 30, "direction": "random", "direction_interval": 5},
+    3: {"rpm": 40, "direction": "random", "direction_interval": 0},
+}
 
 rotation_settings = {}
 rotation_settings_lock = threading.Lock()
@@ -46,6 +55,9 @@ turn_start_heartbeats_lock = threading.Lock()
 # ターンごとの心拍条件状態
 turn_condition_states = {}
 turn_condition_lock = threading.Lock()
+
+attack_direction_cache = {}
+attack_direction_lock = threading.Lock()
 
 # --------------------
 # GPIOセットアップ
@@ -170,7 +182,45 @@ def get_control_mode():
     except:
         return "self"
 
-def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, extreme=None):
+def get_attackers(current_turn):
+    try:
+        response = requests.get(ATTACK_STATUS_API_URL, timeout=2)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("current_turn") != current_turn:
+            return []
+        return [attacker for attacker in data.get("attackers", []) if isinstance(attacker, str)]
+    except requests.RequestException:
+        return []
+
+def apply_attack_effect(current_turn, rpm, direction):
+    attackers = get_attackers(current_turn)
+    if not attackers:
+        return rpm, direction, attackers
+
+    attack_count = min(len(attackers), 3)
+    profile = ATTACK_PROFILES[attack_count]
+
+    if "rpm_steps" in profile:
+        step_index = int(time.time()) % len(profile["rpm_steps"])
+        rpm = profile["rpm_steps"][step_index]
+    else:
+        rpm = profile["rpm"]
+
+    if profile["direction"] == "random":
+        interval = profile["direction_interval"]
+        period = int(time.time() // interval) if interval else time.time_ns()
+        cache_key = (current_turn, attack_count, period)
+        with attack_direction_lock:
+            direction = attack_direction_cache.get(cache_key)
+            if direction is None:
+                direction = random.choice(["c", "a"])
+                attack_direction_cache.clear()
+                attack_direction_cache[cache_key] = direction
+
+    return rpm, direction, attackers
+
+def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, extreme=None, attackers=None):
     try:
         requests.post(
             f"{API_HOST}/set_rotation_status",
@@ -181,6 +231,7 @@ def publish_rotation_status(motor_watch, target_watch, mode, rpm, direction, ext
                 "rpm": rpm,
                 "direction": direction,
                 "extreme": extreme,
+                "attackers": attackers or [],
             },
             timeout=2,
         )
@@ -364,6 +415,8 @@ def data_fetch_loop():
             # 参照する心拍のwatchを決める
             if mode == "self_fast" or mode == "self_slow":
                 target_watch = current_turn
+            elif mode == "attack_challenge":
+                target_watch = current_turn
             elif mode == "next_fast":
                 target_watch = get_next_watch(current_turn)
             elif mode == "prev_fast":
@@ -420,6 +473,7 @@ def data_fetch_loop():
                 rpm = calculate_rpm_fast(evaluation_diff)
 
             direction = calculate_direction(evaluation_diff)
+            rpm, direction, attackers = apply_attack_effect(current_turn, rpm, direction)
 
             # ★回転させる対象は「今ターンの人」（プレイ中の人）
             with rotation_settings_lock:
@@ -427,8 +481,8 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
-            publish_rotation_status(current_turn, target_watch, mode, rpm, direction, extreme)
-            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}")
+            publish_rotation_status(current_turn, target_watch, mode, rpm, direction, extreme, attackers)
+            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, cond={condition}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}, attackers={attackers}")
 
             time.sleep(1)
 

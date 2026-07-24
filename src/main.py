@@ -4,6 +4,7 @@ import json
 import threading
 import csv
 import time  # ← CSV保存に必要
+import random
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from heart_api import heart_api
@@ -32,6 +33,9 @@ CONTROL_FILE = "control_mode.json"
 ROTATION_SETTINGS_FILE = os.path.join(BASE_DIR, "rotation_settings.json")
 ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
 ATTACK_TARGETS_FILE = os.path.join(BASE_DIR, "attack_targets.json")
+ATTACK_ROUND_FILE = os.path.join(BASE_DIR, "attack_round.json")
+ATTACK_PENDING_FILE = os.path.join(BASE_DIR, "attack_pending.json")
+ATTACK_CONDITION_FILE = os.path.join(BASE_DIR, "attack_condition.json")
 CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
 CSV_COLUMNS = [
     "timestamp", "device_id", "heartbeat", "baseline", "diff", "abs_diff",
@@ -39,6 +43,13 @@ CSV_COLUMNS = [
     "target_watch", "is_target", "rpm", "direction", "source_timestamp", "collapse",
 ]
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
+ATTACK_CHALLENGE_RULES = {
+    "first_up_baseline_offset": 30,
+    "first_down_baseline_offset": -10,
+    "down_after_up_baseline_offset": 5,
+    "up_after_down_turn_start_offset": 50,
+    "up_repeat_turn_start_offset": 10,
+}
 
 
 # -------------------------
@@ -145,6 +156,123 @@ def save_attack_targets(targets):
     save_json_file(ATTACK_TARGETS_FILE, targets, log=False)
 
 
+def load_attack_round():
+    round_state = load_json_file(ATTACK_ROUND_FILE)
+    return round_state if isinstance(round_state, dict) else {}
+
+
+def save_attack_round(round_state):
+    save_json_file(ATTACK_ROUND_FILE, round_state, log=False)
+
+
+def load_attack_pending():
+    pending = load_json_file(ATTACK_PENDING_FILE)
+    return pending if isinstance(pending, dict) else {}
+
+
+def save_attack_pending(pending):
+    save_json_file(ATTACK_PENDING_FILE, pending, log=False)
+
+
+def get_latest_heartbeats():
+    heart_data = load_json_file(DATA_FILE)
+    heartbeats = {}
+    for watch_id, records in heart_data.items():
+        if not records:
+            continue
+        try:
+            heartbeats[watch_id] = float(records[-1].get("heartbeat"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return heartbeats
+
+
+def get_attack_challenge_condition():
+    """Return the stable per-turn challenge condition, creating it on a turn change."""
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    condition = load_json_file(ATTACK_CONDITION_FILE)
+    if condition.get("turn") == current_turn and condition.get("direction") in {"up", "down"}:
+        return condition
+
+    previous_direction = condition.get("direction")
+    is_first_turn = not condition.get("turn")
+    direction = random.choice(["up", "down"])
+    condition = {
+        "turn": current_turn,
+        "direction": direction,
+        "previous_direction": previous_direction,
+        "first_turn": is_first_turn,
+        "turn_start_heartbeats": get_latest_heartbeats(),
+    }
+    pending = load_attack_pending()
+    expired_pending = {
+        attacker: signal
+        for attacker, signal in pending.items()
+        if signal.get("turn") == current_turn
+    }
+    if expired_pending != pending:
+        save_attack_pending(expired_pending)
+    save_json_file(ATTACK_CONDITION_FILE, condition, log=False)
+    return condition
+
+
+def attack_threshold(attacker, condition):
+    """Return the current challenge target for one attacking watch."""
+    baselines = load_json_file(BASELINE_FILE)
+    try:
+        baseline = float(baselines[attacker])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    direction = condition["direction"]
+    if condition.get("first_turn"):
+        offset = ATTACK_CHALLENGE_RULES["first_up_baseline_offset"] if direction == "up" else ATTACK_CHALLENGE_RULES["first_down_baseline_offset"]
+        return baseline + offset
+
+    previous_direction = condition.get("previous_direction")
+    turn_start = condition.get("turn_start_heartbeats", {})
+    try:
+        start_bpm = float(turn_start[attacker])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if direction == "down":
+        offset = ATTACK_CHALLENGE_RULES["first_down_baseline_offset"] if previous_direction == "down" else ATTACK_CHALLENGE_RULES["down_after_up_baseline_offset"]
+        return baseline + offset
+
+    offset = ATTACK_CHALLENGE_RULES["up_repeat_turn_start_offset"] if previous_direction == "up" else ATTACK_CHALLENGE_RULES["up_after_down_turn_start_offset"]
+    return start_bpm + offset
+
+
+def resolve_attack_challenge():
+    """Promote pending attack signals once their sender meets this turn's condition."""
+    condition = get_attack_challenge_condition()
+    pending = load_attack_pending()
+    active_targets = load_attack_targets()
+    heartbeats = get_latest_heartbeats()
+    resolved = []
+
+    for attacker, signal in list(pending.items()):
+        if signal.get("turn") != condition.get("turn"):
+            continue
+        threshold = attack_threshold(attacker, condition)
+        heartbeat = heartbeats.get(attacker)
+        if threshold is None or heartbeat is None:
+            continue
+
+        success = heartbeat >= threshold if condition["direction"] == "up" else heartbeat <= threshold
+        if success:
+            active_targets[attacker] = signal["target"]
+            del pending[attacker]
+            resolved.append(attacker)
+
+    if resolved:
+        save_attack_targets(active_targets)
+        save_attack_pending(pending)
+
+    return condition, pending, active_targets, resolved
+
+
 @app.route('/start', methods=['POST'])
 def start_game():
     if load_csv_history():
@@ -245,6 +373,10 @@ def reset_server():
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
+    save_attack_targets({})
+    save_attack_round({"used_attackers": []})
+    save_attack_pending({})
+    save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -412,6 +544,10 @@ def set_rotation_status():
     if extreme not in {None, "up", "down"}:
         return jsonify({"status": "error", "message": "extremeはupまたはdownで指定してください"}), 400
 
+    attackers = data.get("attackers", [])
+    if not isinstance(attackers, list) or not all(isinstance(attacker, str) for attacker in attackers):
+        return jsonify({"status": "error", "message": "attackersはwatch IDの配列で指定してください"}), 400
+
     status = load_json_file(ROTATION_STATUS_FILE)
     status[motor_watch] = {
         "target_watch": target_watch,
@@ -419,6 +555,8 @@ def set_rotation_status():
         "rpm": rpm,
         "direction": direction,
         "extreme": extreme,
+        "attackers": attackers,
+        "attack_count": len(attackers),
     }
     save_rotation_status(status)
     record_csv_snapshot(target_watch, mode, rpm, direction, extreme)
@@ -452,6 +590,7 @@ def set_control_mode():
         "highest_diff",
         "lowest_diff",
         "random_diff",
+        "attack_challenge",
     }
 
     if mode not in allowed_modes:
@@ -472,6 +611,11 @@ def set_control_mode():
 
     with open(CONTROL_FILE, "w") as f:
         json.dump({"mode": mode}, f)
+
+    if mode == "attack_challenge":
+        save_attack_targets({})
+        save_attack_pending({})
+        save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
 
     print("[CONTROL MODE]", mode)
     return jsonify({
@@ -500,9 +644,69 @@ def set_attack_target():
     return jsonify({"status": "ok", "attacker": attacker, "target": target})
 
 
+@app.route('/attack_signal', methods=['POST'])
+def receive_attack_signal():
+    """Pixel Watchからの妨害信号を受け取り、現在の妨害対象へ反映する。"""
+    data = request.get_json(silent=True) or {}
+    attacker = data.get("attacker")
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    target = data.get("target", current_turn)
+    assigned_watches = set(load_json_file(ASSIGNED_FILE).values())
+
+    if attacker not in assigned_watches:
+        return jsonify({"status": "error", "message": "送信元watchが接続されていません"}), 400
+    if target not in assigned_watches or attacker == target:
+        return jsonify({"status": "error", "message": "自分自身への妨害はできません"}), 400
+
+    round_state = load_attack_round()
+    used_attackers = set(round_state.get("used_attackers", []))
+    if attacker in used_attackers:
+        return jsonify({"status": "error", "message": "このラウンドでは既に妨害信号を送信しています"}), 409
+
+    mode = load_json_file(CONTROL_FILE).get("mode")
+    targets = load_attack_targets()
+    used_attackers.add(attacker)
+    if assigned_watches and assigned_watches.issubset(used_attackers):
+        targets = {}
+        used_attackers = {attacker}
+        save_attack_pending({})
+
+    if mode == "attack_challenge":
+        condition = get_attack_challenge_condition()
+        pending = load_attack_pending()
+        pending[attacker] = {"target": target, "turn": condition.get("turn")}
+        save_attack_pending(pending)
+        save_attack_targets(targets)
+        save_attack_round({"used_attackers": sorted(used_attackers)})
+        threshold = attack_threshold(attacker, condition)
+        return jsonify({
+            "status": "pending",
+            "attacker": attacker,
+            "target": target,
+            "direction": condition["direction"],
+            "threshold": threshold,
+            "message": "心拍条件を満たすと妨害が有効になります",
+        })
+
+    targets[attacker] = target
+    save_attack_targets(targets)
+    save_attack_round({"used_attackers": sorted(used_attackers)})
+    attackers = sorted(source for source, attack_target in targets.items() if attack_target == target)
+    return jsonify({
+        "status": "ok",
+        "attacker": attacker,
+        "target": target,
+        "attackers": attackers,
+        "attack_count": len(attackers),
+        "used_attackers": sorted(used_attackers),
+    })
+
+
 @app.route('/current_attackers')
 def get_current_attackers():
     current_turn = load_json_file(TURN_FILE).get("current_turn")
+    if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
+        resolve_attack_challenge()
     attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
     return jsonify({"current_turn": current_turn, "attackers": attackers, "attack_count": len(attackers)})
 
@@ -511,8 +715,29 @@ def get_current_attackers():
 def get_attack_status():
     game_status = load_json_file(GAME_STATUS_FILE)
     current_turn = load_json_file(TURN_FILE).get("current_turn")
+    mode = load_json_file(CONTROL_FILE).get("mode")
+    if mode != "attack_challenge":
+        attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
+        return jsonify({"round": game_status.get("round"), "current_turn": current_turn, "attackers": attackers})
+
+    condition = None
+    pending = {}
+    condition, pending, _, _ = resolve_attack_challenge()
     attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
-    return jsonify({"round": game_status.get("round"), "current_turn": current_turn, "attackers": attackers})
+    pending_attackers = sorted(attacker for attacker, signal in pending.items() if signal.get("target") == current_turn)
+    thresholds = {
+        attacker: attack_threshold(attacker, condition)
+        for attacker in pending_attackers
+    } if condition else {}
+    return jsonify({
+        "round": game_status.get("round"),
+        "current_turn": current_turn,
+        "attackers": attackers,
+        "pending_attackers": pending_attackers,
+        "attack_mode": mode == "attack_challenge",
+        "challenge_direction": condition.get("direction") if condition else None,
+        "pending_thresholds": thresholds,
+    })
 
 @app.route('/get_heart_data', methods=['GET'])
 def get_heart_data():
