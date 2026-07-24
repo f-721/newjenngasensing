@@ -165,6 +165,41 @@ def save_attack_round(round_state):
     save_json_file(ATTACK_ROUND_FILE, round_state, log=False)
 
 
+def update_attack_round_for_turn(current_turn, assigned_watches):
+    """Advance the attack-use round only after every connected watch has had a turn."""
+    round_state = load_attack_round()
+    previous_turn = round_state.get("last_turn")
+    used_attackers = set(round_state.get("used_attackers", []))
+    seen_turns = set(round_state.get("seen_turns", []))
+    completed = bool(round_state.get("completed"))
+
+    if current_turn == previous_turn:
+        return round_state
+
+    if completed:
+        round_state = {
+            "used_attackers": [],
+            "seen_turns": [current_turn],
+            "last_turn": current_turn,
+            "completed": False,
+        }
+        save_attack_targets({})
+        save_attack_pending({})
+        save_attack_round(round_state)
+        return round_state
+
+    if current_turn in assigned_watches:
+        seen_turns.add(current_turn)
+    round_state = {
+        "used_attackers": sorted(used_attackers),
+        "seen_turns": sorted(seen_turns),
+        "last_turn": current_turn,
+        "completed": bool(assigned_watches) and assigned_watches.issubset(seen_turns),
+    }
+    save_attack_round(round_state)
+    return round_state
+
+
 def load_attack_pending():
     pending = load_json_file(ATTACK_PENDING_FILE)
     return pending if isinstance(pending, dict) else {}
@@ -658,7 +693,7 @@ def receive_attack_signal():
     if target not in assigned_watches or attacker == target:
         return jsonify({"status": "error", "message": "自分自身への妨害はできません"}), 400
 
-    round_state = load_attack_round()
+    round_state = update_attack_round_for_turn(current_turn, assigned_watches)
     used_attackers = set(round_state.get("used_attackers", []))
     if attacker in used_attackers:
         return jsonify({"status": "error", "message": "このラウンドでは既に妨害信号を送信しています"}), 409
@@ -666,10 +701,7 @@ def receive_attack_signal():
     mode = load_json_file(CONTROL_FILE).get("mode")
     targets = load_attack_targets()
     used_attackers.add(attacker)
-    if assigned_watches and assigned_watches.issubset(used_attackers):
-        targets = {}
-        used_attackers = {attacker}
-        save_attack_pending({})
+    round_state["used_attackers"] = sorted(used_attackers)
 
     if mode == "attack_challenge":
         condition = get_attack_challenge_condition()
@@ -677,7 +709,7 @@ def receive_attack_signal():
         pending[attacker] = {"target": target, "turn": condition.get("turn")}
         save_attack_pending(pending)
         save_attack_targets(targets)
-        save_attack_round({"used_attackers": sorted(used_attackers)})
+        save_attack_round(round_state)
         threshold = attack_threshold(attacker, condition)
         return jsonify({
             "status": "pending",
@@ -690,7 +722,7 @@ def receive_attack_signal():
 
     targets[attacker] = target
     save_attack_targets(targets)
-    save_attack_round({"used_attackers": sorted(used_attackers)})
+    save_attack_round(round_state)
     attackers = sorted(source for source, attack_target in targets.items() if attack_target == target)
     return jsonify({
         "status": "ok",
@@ -705,6 +737,7 @@ def receive_attack_signal():
 @app.route('/current_attackers')
 def get_current_attackers():
     current_turn = load_json_file(TURN_FILE).get("current_turn")
+    update_attack_round_for_turn(current_turn, set(load_json_file(ASSIGNED_FILE).values()))
     if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
         resolve_attack_challenge()
     attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
@@ -716,6 +749,7 @@ def get_attack_status():
     game_status = load_json_file(GAME_STATUS_FILE)
     current_turn = load_json_file(TURN_FILE).get("current_turn")
     mode = load_json_file(CONTROL_FILE).get("mode")
+    update_attack_round_for_turn(current_turn, set(load_json_file(ASSIGNED_FILE).values()))
     if mode != "attack_challenge":
         attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
         return jsonify({"round": game_status.get("round"), "current_turn": current_turn, "attackers": attackers})
