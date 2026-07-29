@@ -5,6 +5,7 @@ import threading
 import csv
 import time  # ← CSV保存に必要
 import random
+import re
 import tempfile
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -37,19 +38,24 @@ ATTACK_TARGETS_FILE = os.path.join(BASE_DIR, "attack_targets.json")
 ATTACK_ROUND_FILE = os.path.join(BASE_DIR, "attack_round.json")
 ATTACK_PENDING_FILE = os.path.join(BASE_DIR, "attack_pending.json")
 ATTACK_CONDITION_FILE = os.path.join(BASE_DIR, "attack_condition.json")
+ATTACK_SUCCESS_FILE = os.path.join(BASE_DIR, "attack_success.json")
 CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
+LIVE_CSV_FILE = os.path.join(BASE_DIR, "live_rotation.csv")
 CSV_COLUMNS = [
     "timestamp", "device_id", "heartbeat", "baseline", "diff", "abs_diff",
     "game_phase", "current_turn", "control_mode", "random_extreme",
     "target_watch", "is_target", "rpm", "direction", "source_timestamp", "collapse",
+    "attackers", "attack_count", "attack_mode", "challenge_direction",
 ]
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
+# ここで妨害チャレンジの心拍数の違いを載せています
 ATTACK_CHALLENGE_RULES = {
-    "first_up_baseline_offset": 30,
-    "first_down_baseline_offset": -10,
-    "down_after_up_baseline_offset": 5,
-    "up_after_down_turn_start_offset": 50,
-    "up_repeat_turn_start_offset": 10,
+    "first_up_baseline_offset": 30, #最初はbaselineから30上げる
+    "first_down_baseline_offset": -10, #最初はbaselineから10下げる
+    "down_after_up_baseline_offset": 5, #上昇ターンの後の下降はbaselineから5下げる
+    "down_repeat_turn_start_offset": -5, #下降ターンの後の下降はターン開始時の心拍数から5下げる
+    "up_after_down_turn_start_offset": 50, #下降ターンの後の上昇はターン開始時の心拍数から50上げる
+    "up_repeat_turn_start_offset": 10,#上昇ターンの後の上昇はターン開始時の心拍数から10上げる
 }
 
 
@@ -72,11 +78,15 @@ def save_json_file(filename, data, log=True):
 def load_json_file(filename):
     with file_lock:
         if os.path.exists(filename):
-            with open(filename) as f:
-                content = f.read().strip()
-                if not content:
-                    return {}
-                return json.loads(content)
+            try:
+                with open(filename, encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if not content:
+                        return {}
+                    return json.loads(content)
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                print(f"[WARN] Invalid JSON file: {filename}")
+                return {}
         return {}
 
 
@@ -115,7 +125,7 @@ def format_csv_value(column, value):
         return value
 
 
-def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None):
+def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None, attackers=None, attack_context=None):
     if not load_json_file(GAME_STATUS_FILE).get("running", False):
         return
 
@@ -124,6 +134,11 @@ def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None):
     current_turn = load_json_file(TURN_FILE).get("current_turn")
     timestamp = int(time.time() * 1000)
     rows = []
+    attackers_list = [attacker for attacker in (attackers or []) if isinstance(attacker, str)]
+    attack_context = attack_context or {}
+    attack_mode = "attack_challenge" if bool(attack_context.get("attack_mode")) else ""
+    challenge_direction = attack_context.get("challenge_direction") or ""
+    attack_count = attack_context.get("attack_count", len(attackers_list))
 
     for device_id, records in sorted(heart_data.items()):
         if not records:
@@ -146,12 +161,22 @@ def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None):
             "target_watch": target_watch, "is_target": device_id == target_watch,
             "rpm": rpm, "direction": direction,
             "source_timestamp": latest.get("timestamp", ""), "collapse": "",
+            "attackers": ",".join(attackers_list),
+            "attack_count": attack_count,
+            "attack_mode": attack_mode,
+            "challenge_direction": challenge_direction,
         })
 
     if rows:
         history = load_csv_history()
         history.extend(rows)
         save_json_file(CSV_HISTORY_FILE, history, log=False)
+        with open(LIVE_CSV_FILE, mode="a", encoding="utf-8", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            if os.path.getsize(LIVE_CSV_FILE) == 0:
+                writer.writerow(CSV_COLUMNS)
+            for row in rows:
+                writer.writerow([format_csv_value(column, row.get(column, "")) for column in CSV_COLUMNS])
 
 
 def load_attack_targets():
@@ -172,6 +197,14 @@ def save_attack_round(round_state):
     save_json_file(ATTACK_ROUND_FILE, round_state, log=False)
 
 
+def reset_attack_cycle_state():
+    save_attack_targets({})
+    save_attack_pending({})
+    save_attack_success({})
+    save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
+    save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
+
+
 def update_attack_round_for_turn(current_turn, assigned_watches):
     """Advance the attack-use round only after every connected watch has had a turn."""
     round_state = load_attack_round()
@@ -190,8 +223,7 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
             "last_turn": current_turn,
             "completed": False,
         }
-        save_attack_targets({})
-        save_attack_pending({})
+        reset_attack_cycle_state()
         save_attack_round(round_state)
         return round_state
 
@@ -216,6 +248,52 @@ def save_attack_pending(pending):
     save_json_file(ATTACK_PENDING_FILE, pending, log=False)
 
 
+def should_allow_attack(attacker, current_turn, assigned_watches):
+    """A watch may only attack once per full round of turns."""
+    if not attacker or not current_turn:
+        return False
+    round_state = load_attack_round()
+    if not isinstance(round_state, dict):
+        return True
+
+    used_attackers = set(round_state.get("used_attackers", []))
+    assigned = {watch for watch in assigned_watches if isinstance(watch, str) and watch}
+
+    if attacker in used_attackers:
+        return False
+
+    # まだ全員が1巡していない間は、同じ攻撃者による再妨害をブロックする。
+    if assigned and current_turn in assigned and attacker in assigned and attacker != current_turn:
+        return True
+
+    return False
+
+
+def get_watch_sort_key(watch_id):
+    match = re.search(r"(\d+)$", str(watch_id) or "")
+    if match:
+        return (0, int(match.group(1)))
+    return (1, str(watch_id))
+
+
+def is_reset_turn(current_turn, assigned_watches):
+    if not current_turn:
+        return False
+    watches = [watch for watch in assigned_watches if isinstance(watch, str) and watch]
+    if not watches:
+        return False
+    return current_turn == sorted(watches, key=get_watch_sort_key)[0]
+
+
+def load_attack_success():
+    success_state = load_json_file(ATTACK_SUCCESS_FILE)
+    return success_state if isinstance(success_state, dict) else {}
+
+
+def save_attack_success(success_state):
+    save_json_file(ATTACK_SUCCESS_FILE, success_state, log=False)
+
+
 def get_latest_heartbeats():
     heart_data = load_json_file(DATA_FILE)
     heartbeats = {}
@@ -229,14 +307,29 @@ def get_latest_heartbeats():
     return heartbeats
 
 
+def get_allowed_attack_targets(attacker, assigned_watches=None):
+    """Return the watch order for valid targets based on one full cycle around the connected watches."""
+    watches = [watch for watch in (assigned_watches or set(load_json_file(ASSIGNED_FILE).values())) if isinstance(watch, str) and watch]
+    if not watches:
+        return []
+
+    ordered = sorted(watches, key=get_watch_sort_key)
+    if attacker not in ordered:
+        return []
+
+    index = ordered.index(attacker)
+    return ordered[index + 1:] + ordered[:index]
+
+
 def get_attack_challenge_condition():
-    """Return the stable per-turn challenge condition, creating it on a turn change."""
+    """Return the stable per-turn challenge condition without resetting the full attack cycle on the first watch."""
     current_turn = load_json_file(TURN_FILE).get("current_turn")
     condition = load_json_file(ATTACK_CONDITION_FILE)
+
     if condition.get("turn") == current_turn and condition.get("direction") in {"up", "down"}:
         return condition
 
-    previous_direction = condition.get("direction")
+    previous_direction = condition.get("direction") if isinstance(condition, dict) else None
     is_first_turn = not condition.get("turn")
     direction = random.choice(["up", "down"])
     condition = {
@@ -246,14 +339,6 @@ def get_attack_challenge_condition():
         "first_turn": is_first_turn,
         "turn_start_heartbeats": get_latest_heartbeats(),
     }
-    pending = load_attack_pending()
-    expired_pending = {
-        attacker: signal
-        for attacker, signal in pending.items()
-        if signal.get("turn") == current_turn
-    }
-    if expired_pending != pending:
-        save_attack_pending(expired_pending)
     save_json_file(ATTACK_CONDITION_FILE, condition, log=False)
     return condition
 
@@ -279,7 +364,9 @@ def attack_threshold(attacker, condition):
         return None
 
     if direction == "down":
-        offset = ATTACK_CHALLENGE_RULES["first_down_baseline_offset"] if previous_direction == "down" else ATTACK_CHALLENGE_RULES["down_after_up_baseline_offset"]
+        if previous_direction == "down":
+            return start_bpm + ATTACK_CHALLENGE_RULES["down_repeat_turn_start_offset"]
+        offset = ATTACK_CHALLENGE_RULES["first_down_baseline_offset"] if previous_direction is None else ATTACK_CHALLENGE_RULES["down_after_up_baseline_offset"]
         return baseline + offset
 
     offset = ATTACK_CHALLENGE_RULES["up_repeat_turn_start_offset"] if previous_direction == "up" else ATTACK_CHALLENGE_RULES["up_after_down_turn_start_offset"]
@@ -292,6 +379,7 @@ def resolve_attack_challenge():
     pending = load_attack_pending()
     active_targets = load_attack_targets()
     heartbeats = get_latest_heartbeats()
+    success_state = load_attack_success()
     resolved = []
 
     for attacker, signal in list(pending.items()):
@@ -306,19 +394,55 @@ def resolve_attack_challenge():
         if success:
             active_targets[attacker] = signal["target"]
             del pending[attacker]
+            success_state[attacker] = {
+                "turn": condition.get("turn"),
+                "target": signal.get("target"),
+                "direction": condition.get("direction"),
+            }
             resolved.append(attacker)
 
     if resolved:
         save_attack_targets(active_targets)
         save_attack_pending(pending)
+        save_attack_success(success_state)
 
     return condition, pending, active_targets, resolved
 
 
+def is_clear_attack_round_state(round_state):
+    if not isinstance(round_state, dict):
+        return True
+    if round_state.get("used_attackers") or round_state.get("seen_turns"):
+        return False
+    if round_state.get("last_turn") is not None:
+        return False
+    if round_state.get("completed") is True:
+        return False
+    return True
+
+
+def is_game_state_clear():
+    game_status = load_json_file(GAME_STATUS_FILE)
+    if game_status.get("running", False):
+        return False
+
+    if load_csv_history():
+        return False
+    if load_json_file(ATTACK_TARGETS_FILE):
+        return False
+    if load_json_file(ATTACK_PENDING_FILE):
+        return False
+    if load_json_file(ATTACK_SUCCESS_FILE):
+        return False
+    if not is_clear_attack_round_state(load_attack_round()):
+        return False
+    return True
+
+
 @app.route('/start', methods=['POST'])
 def start_game():
-    if load_csv_history():
-        return jsonify({"status": "error", "message": "前回ゲームのCSVデータが残っています。「ゲームだけリセット」でCSVデータを消去してください"}), 400
+    if not is_game_state_clear():
+        return jsonify({"status": "error", "message": "ゲーム状態が残っています。まず「ゲームだけリセット」または「サーバー全体リセット」を実行してください"}), 400
 
     assigned_ids = load_json_file(ASSIGNED_FILE)      # {"ip":"watch1", ...}
     baseline_data = load_json_file(BASELINE_FILE)     # {"watch1": 68.2, ...}
@@ -415,10 +539,8 @@ def reset_server():
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
-    save_attack_targets({})
-    save_attack_round({"used_attackers": []})
-    save_attack_pending({})
-    save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
+    reset_attack_cycle_state()
+    save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -430,7 +552,16 @@ def reset_server():
 @app.route('/reset_game', methods=['POST'])
 def reset_game_only():
     save_json_file(CSV_HISTORY_FILE, [], log=False)
-    return jsonify({"status": "ok", "message": "CSVデータを消去しました"})
+    if os.path.exists(LIVE_CSV_FILE):
+        with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
+            pass
+    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False, "baseline_mode": False}, log=False)
+    save_json_file(TURN_FILE, {"current_turn": None}, log=False)
+    reset_attack_cycle_state()
+    save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
+    save_json_file(ROTATION_SETTINGS_FILE, {"direction": "auto", "hold": True}, log=False)
+    save_json_file(ROTATION_STATUS_FILE, {}, log=False)
+    return jsonify({"status": "ok", "message": "ゲーム状態を完全にリセットしました"})
 
 @app.route("/assign_id")
 def assign_id():
@@ -617,6 +748,13 @@ def set_rotation_status():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "reference_heartbeatsの心拍数は数値で指定してください"}), 400
 
+    attack_context = {
+        "attack_mode": bool(data.get("attack_mode")),
+        "challenge_direction": data.get("challenge_direction"),
+        "pending_attackers": data.get("pending_attackers", []),
+        "attack_count": data.get("attack_count", len(attackers)),
+    }
+
     status = load_json_file(ROTATION_STATUS_FILE)
     status[motor_watch] = {
         "target_watch": target_watch,
@@ -630,9 +768,12 @@ def set_rotation_status():
         "reference_source": reference_source,
         "baseline_bpm": baseline_bpm,
         "reference_heartbeats": reference_heartbeats,
+        "attack_mode": attack_context["attack_mode"],
+        "challenge_direction": attack_context["challenge_direction"],
+        "pending_attackers": attack_context["pending_attackers"],
     }
     save_rotation_status(status)
-    record_csv_snapshot(target_watch, mode, rpm, direction, extreme)
+    record_csv_snapshot(target_watch, mode, rpm, direction, extreme, attackers=attackers, attack_context=attack_context)
     return jsonify({"status": "ok"})
 
 
@@ -687,9 +828,7 @@ def set_control_mode():
         json.dump({"mode": mode}, f)
 
     if mode == "attack_challenge":
-        save_attack_targets({})
-        save_attack_pending({})
-        save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
+        reset_attack_cycle_state()
 
     print("[CONTROL MODE]", mode)
     return jsonify({
@@ -732,10 +871,17 @@ def receive_attack_signal():
     if target not in assigned_watches or attacker == target:
         return jsonify({"status": "error", "message": "自分自身への妨害はできません"}), 400
 
+    allowed_targets = get_allowed_attack_targets(attacker, assigned_watches)
+    if target not in allowed_targets:
+        return jsonify({"status": "error", "message": f"{attacker}はこのターンサイクルでは {', '.join(allowed_targets)} へしか妨害できません"}), 400
+
     round_state = update_attack_round_for_turn(current_turn, assigned_watches)
     used_attackers = set(round_state.get("used_attackers", []))
-    if attacker in used_attackers:
-        return jsonify({"status": "error", "message": "このラウンドでは既に妨害信号を送信しています"}), 409
+    success_state = load_attack_success()
+    if not should_allow_attack(attacker, current_turn, assigned_watches):
+        return jsonify({"status": "error", "message": "このターンサイクルでは既に妨害済みです。次の一周まで再妨害できません"}), 409
+    if success_state.get(attacker, {}).get("turn") == current_turn:
+        return jsonify({"status": "error", "message": "このターンでは既に成功済みのため再妨害できません"}), 409
 
     mode = load_json_file(CONTROL_FILE).get("mode")
     targets = load_attack_targets()

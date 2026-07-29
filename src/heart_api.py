@@ -36,9 +36,15 @@ def load_json_file(filename):
     with file_lock:
         if not os.path.exists(filename):
             return {}
-        with open(filename) as f:
-            content = f.read().strip()
-            return json.loads(content) if content else {}
+        try:
+            with open(filename, encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    return {}
+                return json.loads(content)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            print(f"[WARN] Invalid JSON file: {filename}")
+            return {}
 
 def save_json_file(filename, data):
     with file_lock:
