@@ -464,9 +464,9 @@ def data_fetch_loop():
                 with turn_start_heartbeats_lock:
                     turn_start_heartbeats.clear()
 
-                # ★追加：2秒に1回だけ表示（うるさくしない）
+                # 2秒に1回だけ表示してノイズを抑える。
                 if time.time() - last_info > 2:
-                    print("[WAIT] game running=false なので待機中…（UIでゲーム開始してね）")
+                    print("[WAIT] game not running; waiting for start")
                     last_info = time.time()
 
                 time.sleep(1)
@@ -480,7 +480,8 @@ def data_fetch_loop():
             # ターン変更時にだけ比較基準を固定する。
             # 初ターンは各watchの平均値、2ターン目以降は交代時点の全watch心拍を使う。
             if current_turn != last_turn:
-                print(f"[TURN] {last_turn} -> {current_turn}")
+                if last_turn != current_turn:
+                    print(f"[TURN] {last_turn} -> {current_turn}")
 
                 with random_target_lock:
                     if last_turn in random_target_map:
@@ -503,7 +504,8 @@ def data_fetch_loop():
                     with turn_start_heartbeats_lock:
                         turn_start_heartbeats.clear()
                         turn_start_heartbeats.update(snapshot)
-                    print(f"[TURN REFERENCE] {current_turn}: {snapshot}")
+                    if snapshot:
+                        print(f"[TURN REFERENCE] {current_turn}: {snapshot}")
 
                 last_turn = current_turn
 
@@ -630,7 +632,8 @@ def data_fetch_loop():
                 displayed_references,
                 attack_context,
             )
-            print(f"[心拍] mode={mode} motor={current_turn} uses={target_watch}: bpm={bpm:.1f}, base={baseline:.1f}, ref={reference_bpm:.1f}, diff={evaluation_diff:+.1f} -> rpm={rpm}, dir={direction}, attackers={attackers}")
+            if mode in {"attack_challenge", "self_fast", "self_slow", "next_fast", "prev_fast", "random_fast", "highest_diff", "lowest_diff", "random_diff"}:
+                print(f"[STATE] turn={current_turn} target={target_watch} rpm={rpm} dir={direction} attackers={attackers}")
 
             time.sleep(1)
 
@@ -654,14 +657,17 @@ def rotation_loop():
                 time.sleep(0.05)
                 continue
 
-            print("[ROT] items:", items)  # ★これ追加
+            # 回転対象が増えたときだけ簡潔に表示する。
+            if len(items) > 0:
+                print(f"[ROT] active={len(items)}")
 
             for device_id, (rpm, direction) in items:
                 # RPMを1ステップごとの待機時間へ変換する。
                 # STEP_DELAY_MULTIPLIER と MIN_STEP_DELAY は実機の回転感・安定性を調整する値。
                 step_delay = (60 / rpm) / stepsPerRevolution
                 safe_step_delay = max(step_delay * STEP_DELAY_MULTIPLIER, MIN_STEP_DELAY)
-                print(f"[ROT] run {device_id} rpm={rpm} dir={direction} step={safe_step_delay:.5f}")  # ★これ追加
+                if rpm > 0:
+                    print(f"[ROT] {device_id} rpm={rpm} dir={direction}")
                 rotary(direction, safe_step_delay)
 
         except KeyboardInterrupt:

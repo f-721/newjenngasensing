@@ -7,82 +7,17 @@
     "extreme": null,
     "attackers": [],
     "attack_count": 0,
-    "reference_bpm": 70.0,
+    "reference_bpm": 78.11111111111111,
     "reference_source": "baseline",
-    "baseline_bpm": 70.0,
+    "baseline_bpm": 78.11111111111111,
     "reference_heartbeats": {
-      "watch1": 70.0,
-      "watch2": 67.6,
-      "watch3": 68.75,
-      "watch4": 67.8
-    },
-    "attack_mode": false,
-    "challenge_direction": null,
-    "pending_attackers": []
-  },
-  "watch2": {
-    "target_watch": "watch2",
-    "mode": "attack_challenge",
-    "rpm": 20.0,
-    "direction": "c",
-    "extreme": null,
-    "attackers": [],
-    "attack_count": 0,
-    "reference_bpm": 67.6,
-    "reference_source": "baseline",
-    "baseline_bpm": 67.6,
-    "reference_heartbeats": {
-      "watch1": 70.0,
-      "watch2": 67.6,
-      "watch3": 68.75,
-      "watch4": 67.8
-    },
-    "attack_mode": false,
-    "challenge_direction": null,
-    "pending_attackers": []
-  },
-  "watch3": {
-    "target_watch": "watch3",
-    "mode": "attack_challenge",
-    "rpm": 10.0,
-    "direction": "c",
-    "extreme": null,
-    "attackers": [],
-    "attack_count": 0,
-    "reference_bpm": 68.75,
-    "reference_source": "baseline",
-    "baseline_bpm": 68.75,
-    "reference_heartbeats": {
-      "watch1": 70.0,
-      "watch2": 67.6,
-      "watch3": 68.75,
-      "watch4": 67.8
+      "watch1": 78.11111111111111,
+      "watch2": 78.0
     },
     "attack_mode": true,
     "challenge_direction": "up",
     "pending_attackers": [
       "watch2"
     ]
-  },
-  "watch4": {
-    "target_watch": "watch4",
-    "mode": "attack_challenge",
-    "rpm": 10.0,
-    "direction": "c",
-    "extreme": null,
-    "attackers": [],
-    "attack_count": 0,
-    "reference_bpm": 67.8,
-    "reference_source": "baseline",
-    "baseline_bpm": 67.8,
-    "reference_heartbeats": {
-      "watch1": 70.0,
-      "watch2": 67.6,
-      "watch3": 68.75,
-      "watch4": 67.8
-    },
-    "attack_mode": true,
-    "challenge_direction": "down",
-    "pending_attackers": []
   }
 }

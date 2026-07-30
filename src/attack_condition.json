@@ -1,12 +1,10 @@
 {
-  "turn": "watch4",
-  "direction": "down",
-  "previous_direction": "up",
-  "first_turn": false,
+  "turn": "watch1",
+  "direction": "up",
+  "previous_direction": null,
+  "first_turn": true,
   "turn_start_heartbeats": {
-    "watch3": 70.0,
-    "watch1": 70.0,
-    "watch4": 71.0,
-    "watch2": 71.0
+    "watch2": 73.0,
+    "watch1": 72.0
   }
 }

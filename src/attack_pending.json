@@ -1,6 +1,6 @@
 {
   "watch2": {
-    "target": "watch3",
-    "turn": "watch3"
+    "target": "watch1",
+    "turn": "watch1"
   }
 }

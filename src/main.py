@@ -50,11 +50,11 @@ CSV_COLUMNS = [
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
 # ここで妨害チャレンジの心拍数の違いを載せています
 ATTACK_CHALLENGE_RULES = {
-    "first_up_baseline_offset": 30, #最初はbaselineから30上げる
-    "first_down_baseline_offset": -10, #最初はbaselineから10下げる
-    "down_after_up_baseline_offset": 5, #上昇ターンの後の下降はbaselineから5下げる
-    "down_repeat_turn_start_offset": -5, #下降ターンの後の下降はターン開始時の心拍数から5下げる
-    "up_after_down_turn_start_offset": 50, #下降ターンの後の上昇はターン開始時の心拍数から50上げる
+    "first_up_baseline_offset": 10, #最初はbaselineから30上げる
+    "first_down_baseline_offset": -5, #最初はbaselineから10下げる
+    "down_after_up_baseline_offset": -20, #上昇ターンの後の下降はbaselineから30下げる
+    "down_repeat_turn_start_offset": -3, #下降ターンの後の下降はターン開始時の心拍数から5下げる
+    "up_after_down_turn_start_offset": 30, #下降ターンの後の上昇はターン開始時の心拍数から50上げる
     "up_repeat_turn_start_offset": 10,#上昇ターンの後の上昇はターン開始時の心拍数から10上げる
 }
 
