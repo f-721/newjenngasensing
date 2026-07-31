@@ -3,8 +3,9 @@
     "watch2"
   ],
   "seen_turns": [
-    "watch1"
+    "watch1",
+    "watch2"
   ],
-  "last_turn": "watch1",
-  "completed": false
+  "last_turn": "watch2",
+  "completed": true
 }
