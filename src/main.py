@@ -48,13 +48,21 @@ CSV_COLUMNS = [
     "attackers", "attack_count", "attack_mode", "challenge_direction",
 ]
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
-# ここで妨害チャレンジの心拍数の違いを載せています
+# ゲーム用: 妨害チャレンジのノルマ心拍を決める設定。
+# 各watchの初回妨害だけ平均心拍を基準にし、2回目以降はターン交代時心拍を基準にする。
+# 計算例:
+#   初回・上昇、平均70 BPM                 -> 70 + 10 = 80 BPM
+#   初回・下降、平均70 BPM                 -> 70 - 3  = 67 BPM
+#   上昇後に下降、交代時70 BPM             -> 70 - 5  = 65 BPM
+#   下降後に下降、交代時70 BPM             -> 70 - 2  = 68 BPM
+#   下降後に上昇、交代時70 BPM             -> 70 + 20 = 90 BPM
+#   上昇後に上昇、交代時70 BPM             -> 70 + 10 = 80 BPM
 ATTACK_CHALLENGE_RULES = {
-    "first_up_baseline_offset": 10, #最初はbaselineから30上げる
-    "first_down_baseline_offset": -5, #最初はbaselineから10下げる
-    "down_after_up_baseline_offset": -20, #上昇ターンの後の下降はbaselineから30下げる
-    "down_repeat_turn_start_offset": -3, #下降ターンの後の下降はターン開始時の心拍数から5下げる
-    "up_after_down_turn_start_offset": 30, #下降ターンの後の上昇はターン開始時の心拍数から50上げる
+    "first_up_baseline_offset": 10, #最初はbaselineから10上げる
+    "first_down_baseline_offset": -3, #最初はbaselineから3下げる
+    "down_after_up_turn_start_offset": -5, #上昇ターンの後の下降はターン開始時の心拍数から5下げる
+    "down_repeat_turn_start_offset": -2, #下降ターンの後の下降はターン開始時の心拍数から2下げる
+    "up_after_down_turn_start_offset": 20, #下降ターンの後の上昇はターン開始時の心拍数から20上げる
     "up_repeat_turn_start_offset": 10,#上昇ターンの後の上昇はターン開始時の心拍数から10上げる
 }
 
@@ -197,12 +205,14 @@ def save_attack_round(round_state):
     save_json_file(ATTACK_ROUND_FILE, round_state, log=False)
 
 
-def reset_attack_cycle_state():
+def reset_attack_cycle_state(reset_condition=True):
+    """妨害参加状態を初期化する。ターン継続中は直前の条件履歴を残せる。"""
     save_attack_targets({})
     save_attack_pending({})
     save_attack_success({})
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
-    save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
+    if reset_condition:
+        save_json_file(ATTACK_CONDITION_FILE, {}, log=False)
 
 
 def update_attack_round_for_turn(current_turn, assigned_watches):
@@ -223,7 +233,9 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
             "last_turn": current_turn,
             "completed": False,
         }
-        reset_attack_cycle_state()
+        # 一周後は再妨害を許可するが、次ターンのノルマ計算に必要な
+        # previous_direction は消さない。
+        reset_attack_cycle_state(reset_condition=False)
         save_attack_round(round_state)
         return round_state
 
@@ -330,6 +342,8 @@ def get_attack_challenge_condition():
         return condition
 
     previous_direction = condition.get("direction") if isinstance(condition, dict) else None
+    experienced_attackers = set(condition.get("experienced_attackers", []))
+    experienced_attackers.update(condition.get("attackers_this_turn", []))
     is_first_turn = not condition.get("turn")
     direction = random.choice(["up", "down"])
     condition = {
@@ -337,6 +351,8 @@ def get_attack_challenge_condition():
         "direction": direction,
         "previous_direction": previous_direction,
         "first_turn": is_first_turn,
+        "experienced_attackers": sorted(experienced_attackers),
+        "attackers_this_turn": [],
         "turn_start_heartbeats": get_latest_heartbeats(),
     }
     save_json_file(ATTACK_CONDITION_FILE, condition, log=False)
@@ -344,33 +360,50 @@ def get_attack_challenge_condition():
 
 
 def attack_threshold(attacker, condition):
-    """Return the current challenge target for one attacking watch."""
+    """妨害者ごとの基準心拍に、現在・前回の方向に対応する設定値を加えてノルマを返す。"""
+    reference_bpm, reference_source = attack_reference(attacker, condition)
+    if reference_bpm is None:
+        return None
+
+    direction = condition["direction"]
+    if reference_source == "baseline":
+        offset = ATTACK_CHALLENGE_RULES["first_up_baseline_offset"] if direction == "up" else ATTACK_CHALLENGE_RULES["first_down_baseline_offset"]
+        return reference_bpm + offset
+
+    previous_direction = condition.get("previous_direction")
+    if direction == "down":
+        offset = (
+            ATTACK_CHALLENGE_RULES["down_repeat_turn_start_offset"]
+            if previous_direction == "down"
+            else ATTACK_CHALLENGE_RULES["down_after_up_turn_start_offset"]
+        )
+        return reference_bpm + offset
+
+    offset = ATTACK_CHALLENGE_RULES["up_repeat_turn_start_offset"] if previous_direction == "up" else ATTACK_CHALLENGE_RULES["up_after_down_turn_start_offset"]
+    return reference_bpm + offset
+
+
+def attack_reference(attacker, condition):
+    """
+    妨害ノルマの比較基準をwatchごとに返す。
+    未妨害なら本人の平均心拍、妨害経験済みなら今回のターン交代時心拍を使う。
+    """
     baselines = load_json_file(BASELINE_FILE)
     try:
         baseline = float(baselines[attacker])
     except (KeyError, TypeError, ValueError):
-        return None
+        return None, None
 
-    direction = condition["direction"]
-    if condition.get("first_turn"):
-        offset = ATTACK_CHALLENGE_RULES["first_up_baseline_offset"] if direction == "up" else ATTACK_CHALLENGE_RULES["first_down_baseline_offset"]
-        return baseline + offset
+    experienced_attackers = set(condition.get("experienced_attackers", []))
+    if attacker not in experienced_attackers:
+        return baseline, "baseline"
 
-    previous_direction = condition.get("previous_direction")
     turn_start = condition.get("turn_start_heartbeats", {})
     try:
         start_bpm = float(turn_start[attacker])
     except (KeyError, TypeError, ValueError):
-        return None
-
-    if direction == "down":
-        if previous_direction == "down":
-            return start_bpm + ATTACK_CHALLENGE_RULES["down_repeat_turn_start_offset"]
-        offset = ATTACK_CHALLENGE_RULES["first_down_baseline_offset"] if previous_direction is None else ATTACK_CHALLENGE_RULES["down_after_up_baseline_offset"]
-        return baseline + offset
-
-    offset = ATTACK_CHALLENGE_RULES["up_repeat_turn_start_offset"] if previous_direction == "up" else ATTACK_CHALLENGE_RULES["up_after_down_turn_start_offset"]
-    return start_bpm + offset
+        return None, None
+    return start_bpm, "turn_start"
 
 
 def resolve_attack_challenge():
@@ -495,7 +528,10 @@ def start_game():
 
     # ターン初期化
     ids = sorted(assigned_watch_ids)
-    save_json_file(TURN_FILE, {"current_turn": ids[0] if ids else None})
+    save_json_file(TURN_FILE, {
+        "current_turn": ids[0] if ids else None,
+        "turn_number": 1 if ids else 0,
+    })
 
     print("[GAME START] baseline完全一致 → 開始")
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
@@ -535,7 +571,7 @@ def reset_server():
         "game_over": False,
         "baseline_mode": False
     })
-    save_json_file(TURN_FILE, {"current_turn": None})
+    save_json_file(TURN_FILE, {"current_turn": None, "turn_number": 0})
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
@@ -556,7 +592,7 @@ def reset_game_only():
         with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
             pass
     save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False, "baseline_mode": False}, log=False)
-    save_json_file(TURN_FILE, {"current_turn": None}, log=False)
+    save_json_file(TURN_FILE, {"current_turn": None, "turn_number": 0}, log=False)
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
     save_json_file(ROTATION_SETTINGS_FILE, {"direction": "auto", "hold": True}, log=False)
@@ -601,7 +637,14 @@ def set_turn():
     assigned_ids = load_json_file(ASSIGNED_FILE)
     if new_turn not in assigned_ids.values():
         return jsonify({"status": "error", "message": "指定されたIDが存在しません"}), 400
-    save_json_file(TURN_FILE, {"current_turn": new_turn})
+    turn_state = load_json_file(TURN_FILE)
+    turn_number = turn_state.get("turn_number", 0)
+    if turn_state.get("current_turn") != new_turn:
+        turn_number += 1
+    save_json_file(TURN_FILE, {
+        "current_turn": new_turn,
+        "turn_number": turn_number,
+    })
     print(f"[API] 管理者操作: ターンを {new_turn} に設定しました")
     return jsonify({"status": "ok", "message": f"{new_turn} に設定しました"})
 
@@ -890,6 +933,10 @@ def receive_attack_signal():
 
     if mode == "attack_challenge":
         condition = get_attack_challenge_condition()
+        attackers_this_turn = set(condition.get("attackers_this_turn", []))
+        attackers_this_turn.add(attacker)
+        condition["attackers_this_turn"] = sorted(attackers_this_turn)
+        save_json_file(ATTACK_CONDITION_FILE, condition, log=False)
         pending = load_attack_pending()
         pending[attacker] = {"target": target, "turn": condition.get("turn")}
         save_attack_pending(pending)
@@ -953,6 +1000,8 @@ def get_attack_status():
         watch_id: {
             "heartbeat": heartbeats.get(watch_id),
             "threshold": attack_threshold(watch_id, condition),
+            "reference_bpm": attack_reference(watch_id, condition)[0],
+            "reference_source": attack_reference(watch_id, condition)[1],
             "status": "達成" if watch_id in attackers else "挑戦中" if watch_id in pending_attackers else "未挑戦",
         }
         for watch_id in sorted(set(load_json_file(ASSIGNED_FILE).values()))

@@ -609,7 +609,13 @@ async function refreshCurrentTurn() {
       try {
         const res = await fetch('/turn');
         const data = await res.json();
-        let display = data.current_turn ? `watch ${data.current_turn.slice(-1)} のターンです` : '全員受付中';
+        const turnNumber = Number(data.turn_number);
+        const turnLabel = Number.isInteger(turnNumber) && turnNumber > 0
+          ? `第${turnNumber}ターン　`
+          : '';
+        let display = data.current_turn
+          ? `${turnLabel}watch ${data.current_turn.slice(-1)} のターンです`
+          : '全員受付中';
         document.getElementById('current-turn').innerText = '今のターン: ' + display;
         document.getElementById('turn-display-large').innerText = display;
       } catch (error) {
@@ -894,7 +900,6 @@ async function refreshCurrentTarget() {
       const references = info.reference_heartbeats || {};
       const sourceLabel = info.reference_source === 'turn_start' ? 'ターン交代時の心拍' : '平均値';
       const lines = Object.entries(references)
-        .filter(([watchId]) => watchId !== current)
         .sort(([firstWatch], [secondWatch]) => firstWatch.localeCompare(secondWatch))
         .map(([watchId, heartbeat]) => {
           const bpm = Number(heartbeat);
@@ -911,6 +916,22 @@ async function refreshCurrentTarget() {
       const activeAttackers = Array.isArray(attackData.attackers) ? attackData.attackers : attackers;
       const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
       const conditionNames = { up: '上昇', down: '下降' };
+      if (attackData.attack_mode && referenceEl) {
+        const requirements = attackData.challenge_requirements || {};
+        const referenceLines = Object.entries(requirements)
+          .sort(([firstWatch], [secondWatch]) => firstWatch.localeCompare(secondWatch))
+          .map(([watchId, requirement]) => {
+            const bpm = Number(requirement.reference_bpm);
+            if (!Number.isFinite(bpm)) return `${watchId}: 未設定`;
+            const label = requirement.reference_source === 'turn_start'
+              ? 'ターン交代時'
+              : '平均値';
+            return `${watchId}: ${Math.round(bpm)} BPM (${label})`;
+          });
+        referenceEl.innerText = referenceLines.length
+          ? `比較の参考心拍\n${referenceLines.join('\n')}`
+          : '比較の参考心拍: 未設定';
+      }
       if (!attackData.attack_mode) {
         attackEl.innerText = activeAttackers.length
           ? `妨害情報：現在参加 ${activeAttackers.join(', ')} (${activeAttackers.length}台)`

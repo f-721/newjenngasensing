@@ -21,8 +21,16 @@ stepsPerRevolution = 2048
 MIN_STEP_DELAY = 0.003
 STEP_DELAY_MULTIPLIER = 4
 
-# 通常時の心拍差 -> RPM の対応表。
-# 各要素は (境界値, RPM, 境界を含めるか)。値はここだけ変更すればよい。
+# 通常時の「現在心拍 - 比較基準」-> RPM の対応表。
+# self_fast（自分の心拍）、next/prev/random_fast（他人の心拍）、
+# highest/lowest/random_diff（上昇・下降差）の全モードで共通して使う。
+# 各要素は (心拍差の上限, RPM, 上限値を含むか)。
+# 現在の設定:
+#   差が 0～3 BPM       -> 10 RPM
+#   差が 3より大～8未満 -> 20 RPM
+#   差が 8～15未満      -> 30 RPM
+#   差が 15以上         -> 40 RPM
+# 例: 基準70 BPM、現在80 BPMなら差10なので30 RPM。
 FAST_RPM_TIERS = (
     (3, 10, True),
     (8, 20, False),
@@ -30,7 +38,11 @@ FAST_RPM_TIERS = (
     (float("inf"), 40, False),
 )
 
-# self_slow モード用。心拍差が小さいほど高速になる逆転テーブル。
+# self_slow（「差が大きいほど遅い」）専用の逆転テーブル。
+#   差が 0～3未満   -> 40 RPM
+#   差が 3～8未満   -> 30 RPM
+#   差が 8～15未満  -> 20 RPM
+#   差が 15以上     -> 10 RPM
 SLOW_RPM_TIERS = (
     (3, 40, False),
     (8, 30, False),
@@ -45,13 +57,17 @@ TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
 
-# 妨害が無いときの固定回転設定。ここを変えれば実機の待機回転を簡単に調整できる。
+# ゲーム用: 妨害なし、または妨害チャレンジ未達成中の固定回転。
+# 現在は5秒単位で10 RPM・時計回り(c)。c=時計回り、a=反時計回り。
 NO_ATTACK_FALLBACK_RPM = 10
 NO_ATTACK_FALLBACK_DIRECTION = "c"
 NO_ATTACK_FALLBACK_SECONDS = 5.0
 no_attack_fallback_until = 0.0
 
-# 妨害成功人数ごとの演出。通常RPMより優先して適用する。
+# ゲーム用: 妨害成功人数ごとの演出。上の心拍差RPMより優先して適用する。
+# 1人成功: 5→10→15→20→25→30 RPMを1秒ごとに切替、通常方向を維持。
+# 2人成功: 30 RPM、5秒ごとに回転方向をランダム変更。
+# 3人以上: 40 RPM、3秒ごとに回転方向をランダム変更。
 # rpm_steps は1秒ごとに順番に切り替わる。direction_interval が0なら毎回ランダム。
 ATTACK_PROFILES = {
     1: {
@@ -164,8 +180,9 @@ def calculate_rpm_slow(diff):
 
 def calculate_direction(diff):
     """
-    baselineより上なら 'c'
-    baselineより下なら 'a'
+    比較基準以上なら時計回り(c)、比較基準未満なら反時計回り(a)。
+    下降差モードでは呼び出し前に差の符号を反転するため、
+    「基準より大きく下降した」ことが正方向として扱われる。
     """
     if diff >= 0:
         return 'c'
@@ -189,6 +206,20 @@ def activate_no_attack_fallback(now=None):
     current_time = time.time() if now is None else now
     no_attack_fallback_until = current_time + NO_ATTACK_FALLBACK_SECONDS
     return no_attack_fallback_until
+
+def should_use_no_attack_fallback(attack_status, attackers):
+    """
+    固定10 RPMへ切り替えるのは妨害チャレンジ中だけ。
+    通常の自分・他人・差分モードではFalseを返し、心拍差RPMをそのまま使う。
+    """
+    if not bool(attack_status.get("attack_mode")):
+        return False
+    pending_attackers = [
+        attacker
+        for attacker in attack_status.get("pending_attackers", [])
+        if isinstance(attacker, str)
+    ]
+    return not attackers or bool(pending_attackers)
 
 # --------------------
 # API通信
@@ -281,6 +312,10 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
     profile = ATTACK_PROFILES[attack_count] if attack_count else {"rpm": rpm, "direction": "normal"}
 
     if bool(attack_status.get("attack_mode")):
+        # 妨害チャレンジ成功後のゲーム演出:
+        # 成功1人なら最低30 RPM、2人なら最低35 RPM、3人なら最低40 RPM。
+        # 元の心拍差RPMのほうが速い場合は、そのRPMを下げずに維持する。
+        # 上昇条件は時計回り(c)、下降条件は反時計回り(a)へ固定する。
         challenge_direction = attack_status.get("challenge_direction")
         if challenge_direction == "up":
             rpm = max(rpm, 25 + attack_count * 5)
@@ -442,6 +477,25 @@ def get_random_difference_watch(current_turn, heart_data, reference_heartbeats=N
 
     return get_difference_watch(current_turn, heart_data, largest, reference_heartbeats), largest
 
+def get_comparison_references(use_baseline_reference, baseline_references, turn_references):
+    """そのターンのRPM判定と画面表示で共有する比較基準を返す。"""
+    if use_baseline_reference:
+        return dict(baseline_references), "baseline"
+    return dict(turn_references), "turn_start"
+
+def get_displayed_references(mode, current_turn, target_watch, comparison_references):
+    """RPM判定で実際に参照するwatchだけを画面表示用に返す。"""
+    if mode in {"highest_diff", "lowest_diff", "random_diff"}:
+        return {
+            watch_id: heartbeat
+            for watch_id, heartbeat in comparison_references.items()
+            if watch_id != current_turn
+        }
+
+    if target_watch in comparison_references:
+        return {target_watch: comparison_references[target_watch]}
+    return {}
+
 # --------------------
 # データ取得スレッド
 # --------------------
@@ -522,15 +576,26 @@ def data_fetch_loop():
             with turn_start_heartbeats_lock:
                 turn_references = dict(turn_start_heartbeats)
 
-            difference_mode = mode in {"highest_diff", "lowest_diff", "random_diff"}
-            comparison_references = baseline_references if use_baseline_reference else turn_references
-            comparison_source = "baseline" if use_baseline_reference else "turn_start"
+            comparison_references, comparison_source = get_comparison_references(
+                use_baseline_reference,
+                baseline_references,
+                turn_references,
+            )
 
-            # 参照する心拍のwatchを決める
+            # モードごとに「RPM計算へ使う心拍のwatch」を決める。
+            # self_fast/self_slow : 現在手番本人
+            # next_fast           : watch順で次の人
+            # prev_fast           : watch順で前の人
+            # random_fast         : 現在手番以外からターンごとに1人固定
+            # highest_diff        : 現在手番以外で基準より最も上がった人
+            # lowest_diff         : 現在手番以外で基準より最も下がった人
+            # random_diff         : 上昇最大/下降最大をターンごとにランダム選択
+            # attack_challenge    : 現在手番以外（2台構成では必ず相手）
             if mode == "self_fast" or mode == "self_slow":
                 target_watch = current_turn
             elif mode == "attack_challenge":
-                target_watch = current_turn
+                # 妨害チャレンジでは手番本人ではなく、相手側の心拍をRPM判定に使う。
+                target_watch = get_next_watch(current_turn)
             elif mode == "next_fast":
                 target_watch = get_next_watch(current_turn)
             elif mode == "prev_fast":
@@ -562,15 +627,19 @@ def data_fetch_loop():
                 bpm = 0
 
             baseline = baseline_references.get(target_watch)
-            reference_bpm = comparison_references.get(target_watch) if difference_mode else baseline
+            reference_bpm = comparison_references.get(target_watch)
             if baseline is None or reference_bpm is None:
-                print(f"[WARN] baseline無し: target={target_watch} （モーター停止）")
+                print(f"[WARN] 比較基準無し: target={target_watch} source={comparison_source} （モーター停止）")
                 with rotation_settings_lock:
                     rotation_settings.clear()
                 time.sleep(1)
                 continue
 
-            # ターン中に比較基準は更新しない。上昇・下降モードは採用方向だけで符号を決める。
+            # ゲーム用の基本RPM計算:
+            #   raw_diff = 利用watchの現在心拍 - そのwatchの比較基準
+            # 比較基準は1ターン目が平均値、2ターン目以降がターン交代時心拍。
+            # 下降差モードだけ符号を反転し、「どれだけ下がったか」を正の差として扱う。
+            # 最後に差の絶対値を FAST_RPM_TIERS / SLOW_RPM_TIERS へ当てはめる。
             raw_diff = bpm - reference_bpm
             evaluation_diff = raw_diff if extreme != "down" else -raw_diff
             if mode == "self_slow":
@@ -582,13 +651,10 @@ def data_fetch_loop():
             attack_status = get_attack_status(current_turn)
             attackers = [attacker for attacker in attack_status.get("attackers", []) if isinstance(attacker, str)]
 
-            pending_attackers = [attacker for attacker in attack_status.get("pending_attackers", []) if isinstance(attacker, str)]
-            should_fallback = (
-                (not attackers and not bool(attack_status.get("attack_mode")))
-                or bool(attack_status.get("attack_mode")) and (not attackers or bool(pending_attackers))
-            )
+            should_fallback = should_use_no_attack_fallback(attack_status, attackers)
 
-            # 妨害が無い場合、または未成功の挑戦が残っている場合は固定回転へフォールバックする。
+            # 妨害チャレンジ中に成功者がいない、または未成功者が残る場合だけ固定回転にする。
+            # 通常モードはこの分岐へ入らず、上で計算した心拍差RPMを維持する。
             if should_fallback:
                 fallback_rpm, fallback_direction, fallback_active = get_no_attack_fallback_rotation()
                 if fallback_active:
@@ -616,8 +682,12 @@ def data_fetch_loop():
                 if rpm > 0:
                     rotation_settings[current_turn] = (rpm, direction)
 
-            # 差分モードでは交代時の固定心拍、その他では平均値を画面に渡す。
-            displayed_references = comparison_references if difference_mode else baseline_references
+            displayed_references = get_displayed_references(
+                mode,
+                current_turn,
+                target_watch,
+                comparison_references,
+            )
             publish_rotation_status(
                 current_turn,
                 target_watch,
@@ -627,7 +697,7 @@ def data_fetch_loop():
                 extreme,
                 attackers,
                 reference_bpm,
-                comparison_source if difference_mode else "baseline",
+                comparison_source,
                 baseline,
                 displayed_references,
                 attack_context,

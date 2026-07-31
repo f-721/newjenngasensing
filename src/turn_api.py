@@ -32,8 +32,12 @@ def load_current_turn():
     data = load_json_file(TURN_FILE)
     return data.get("current_turn")
 
-def save_current_turn(turn):
-    save_json_file(TURN_FILE, {"current_turn": turn})
+def save_current_turn(turn, advance=False):
+    data = load_json_file(TURN_FILE)
+    turn_number = data.get("turn_number", 0)
+    if advance:
+        turn_number += 1
+    save_json_file(TURN_FILE, {"current_turn": turn, "turn_number": turn_number})
 
 # -------------------------
 # APIルート
@@ -41,9 +45,11 @@ def save_current_turn(turn):
 
 @turn_api.route('/turn', methods=['GET'])
 def get_turn():
-    turn = load_current_turn()
+    data = load_json_file(TURN_FILE)
+    turn = data.get("current_turn")
+    turn_number = data.get("turn_number", 0)
     print(f"[API] 現在のターン取得 -> {turn}")
-    return jsonify({"current_turn": turn})
+    return jsonify({"current_turn": turn, "turn_number": turn_number})
 
 @turn_api.route('/next_turn', methods=['POST'])
 def next_turn():
@@ -61,7 +67,7 @@ def next_turn():
         next_index = (current_index + 1) % len(all_ids)
 
     next_id = all_ids[next_index]
-    save_current_turn(next_id)
+    save_current_turn(next_id, advance=True)
 
     print()
     print("=== [ターン進行] ===")
@@ -69,4 +75,10 @@ def next_turn():
     print("======================")
     print()
 
-    return jsonify({"status": "ok", "message": f"{current} → {next_id}", "next_turn": next_id})
+    turn_number = load_json_file(TURN_FILE).get("turn_number", 0)
+    return jsonify({
+        "status": "ok",
+        "message": f"{current} → {next_id}",
+        "next_turn": next_id,
+        "turn_number": turn_number,
+    })
