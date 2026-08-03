@@ -3,7 +3,6 @@ try:
 except ImportError:
     GPIO = None
 
-from time import sleep
 import os
 import time
 import requests
@@ -14,12 +13,37 @@ import random
 # 設定
 # --------------------
 motorPins = (18, 23, 24, 25)
-stepsPerRevolution = 2048
 
-# 実モータの速度調整値。小さいほどGPIO信号の待機時間が短くなり、速く回る。
-# モータが脱調する場合は MIN_STEP_DELAY を大きくする。
-MIN_STEP_DELAY = 0.003
-STEP_DELAY_MULTIPLIER = 4
+# 28BYJ-48 はULN2003基板との組み合わせでは8相ハーフステップ駆動にする。
+# 減速機の個体差はあるが、出力軸1回転は約4096ハーフステップ。
+stepsPerRevolution = 4096
+HALF_STEP_SEQUENCE = (
+    (1, 0, 0, 0),
+    (1, 1, 0, 0),
+    (0, 1, 0, 0),
+    (0, 1, 1, 0),
+    (0, 0, 1, 0),
+    (0, 0, 1, 1),
+    (0, 0, 0, 1),
+    (1, 0, 0, 1),
+)
+
+# 40 RPM時は約0.000366秒/ハーフステップ。
+# 10/20/30/40 RPMを下限値へ丸めず、それぞれ異なる速度にする。
+# 高速域で脱調する場合は、この値ではなくRPMテーブルの最高値を下げる。
+MIN_STEP_DELAY = 0.0003
+STEPS_PER_BATCH = 16
+
+# 画面・ゲーム内のRPM値を、28BYJ-48が脱調しにくい体感速度へ割り当てる。
+# 値は1ハーフステップ当たりの秒数（小さいほど速い）。
+RPM_STEP_DELAYS = {
+    10: 0.0030,  # かなりゆっくり
+    20: 0.0018,  # 程々
+    30: 0.0013,  # 少し速い
+    40: 0.0010,  # このモーターで安定しやすい高速域
+}
+STARTUP_STEP_DELAY = RPM_STEP_DELAYS[10]
+ACCELERATION_RATE = 0.04
 
 # 通常時の「現在心拍 - 比較基準」-> RPM の対応表。
 # self_fast（自分の心拍）、next/prev/random_fast（他人の心拍）、
@@ -56,6 +80,7 @@ STATUS_API_URL = f'{API_HOST}/status'
 TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
+ROTATION_SETTINGS_API_URL = f'{API_HOST}/get_rotation_settings'
 
 # ゲーム用: 妨害なし、または妨害チャレンジ未達成中の固定回転。
 # 現在は5秒単位で10 RPM・時計回り(c)。c=時計回り、a=反時計回り。
@@ -96,6 +121,9 @@ rotation_settings_lock = threading.Lock()
 control_mode = "self"
 
 gpio_ready = False
+motor_phase = 0
+next_step_deadline = None
+motor_state_lock = threading.Lock()
 
 # baseline キャッシュ（watchごとの平均値）
 baseline_cache = {}
@@ -115,6 +143,10 @@ turn_start_heartbeats_lock = threading.Lock()
 
 attack_direction_cache = {}
 attack_direction_lock = threading.Lock()
+
+applied_direction = None
+applied_direction_changed_at = 0.0
+applied_direction_lock = threading.Lock()
 
 # --------------------
 # GPIOセットアップ
@@ -141,19 +173,51 @@ def setup_motor():
 # --------------------
 # モーター回転
 # --------------------
-def rotary(direction, stepSpeed):
+def calculate_step_delay(rpm):
+    """ゲーム内RPMを実機向けのハーフステップ間隔へ変換する。"""
+    if rpm <= 0:
+        return None
+    if rpm in RPM_STEP_DELAYS:
+        return RPM_STEP_DELAYS[rpm]
+    return max(60.0 / (float(rpm) * stepsPerRevolution), MIN_STEP_DELAY)
+
+
+def approach_step_delay(current, target):
+    """急加速による脱調を避けながら目標ステップ間隔へ近づける。"""
+    if current is None:
+        current = max(target, STARTUP_STEP_DELAY)
+    max_change = max(current * ACCELERATION_RATE, 0.00001)
+    if target < current:
+        return max(target, current - max_change)
+    return min(target, current + max_change)
+
+
+def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH):
+    """励磁相を呼び出し間で保持し、一定周期でハーフステップ駆動する。"""
+    global motor_phase, next_step_deadline
     if GPIO is None or not gpio_ready:
         return
 
     try:
-        for _ in range(8):
-            for j in range(4):
-                for i in range(4):
-                    if direction == 'c':
-                        GPIO.output(motorPins[i], (0x99 >> j) & (0x08 >> i))
-                    else:
-                        GPIO.output(motorPins[i], (0x99 << j) & (0x80 >> i))
-                    sleep(stepSpeed)
+        phase_delta = 1 if direction == 'c' else -1
+        with motor_state_lock:
+            # 前回の期限が古い場合は、遅れを一気に取り戻そうとせず現在から再開する。
+            now = time.monotonic()
+            if next_step_deadline is None or next_step_deadline < now - stepSpeed:
+                next_step_deadline = now
+
+            for _ in range(steps):
+                motor_phase = (motor_phase + phase_delta) % len(HALF_STEP_SEQUENCE)
+                pattern = HALF_STEP_SEQUENCE[motor_phase]
+
+                # 4本を同じステップ内で更新し、更新途中では待機しない。
+                for pin, value in zip(motorPins, pattern):
+                    GPIO.output(pin, value)
+
+                next_step_deadline += stepSpeed
+                remaining = next_step_deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
     except RuntimeError as exc:
         print(f"[WARN] GPIO output skipped: {exc}")
     except Exception as exc:
@@ -231,7 +295,8 @@ def get_game_status():
         return res.json().get("running", False)
     except Exception as e:
         print("[ERROR] /status取得失敗:", e)
-        return False
+        # 通信失敗をゲーム停止と扱うと、一瞬の失敗だけでモーターが止まる。
+        return None
 
 def get_current_turn():
     try:
@@ -284,6 +349,44 @@ def get_control_mode():
         return res.json().get("mode","self")
     except:
         return "self"
+
+
+def get_rotation_preferences():
+    """管理画面の方向指定と、5秒キープ/即時切替設定を取得する。"""
+    try:
+        res = requests.get(ROTATION_SETTINGS_API_URL, timeout=2)
+        res.raise_for_status()
+        data = res.json()
+        direction = data.get("direction", "auto")
+        hold = data.get("hold", True)
+        if direction not in {"auto", "c", "a"}:
+            direction = "auto"
+        return {"direction": direction, "hold": hold if isinstance(hold, bool) else True}
+    except (requests.RequestException, ValueError, TypeError):
+        # 設定APIの一時失敗では自動方向をそのまま即時反映する。
+        return {"direction": "auto", "hold": False}
+
+
+def apply_rotation_preferences(calculated_direction, preferences, now=None):
+    """手動方向を優先し、自動時はRPMと無関係にランダム方向を選ぶ。"""
+    global applied_direction, applied_direction_changed_at
+    current_time = time.monotonic() if now is None else now
+    requested = preferences.get("direction", "auto")
+    # autoではデータ取得ループ（約1秒）ごとに方向を抽選する。
+    # 2択なので、同じ方向を引けば維持、逆方向を引けば反転する。
+    candidate = requested if requested in {"c", "a"} else random.choice(("c", "a"))
+    immediate = not bool(preferences.get("hold", True))
+
+    with applied_direction_lock:
+        if applied_direction is None:
+            applied_direction = candidate
+            applied_direction_changed_at = current_time
+        elif candidate != applied_direction:
+            # hold時は「実際に方向が変わった時刻」から最低5秒キープする。
+            if immediate or current_time - applied_direction_changed_at >= 5.0:
+                applied_direction = candidate
+                applied_direction_changed_at = current_time
+        return applied_direction, immediate
 
 def get_attack_status(current_turn):
     try:
@@ -508,7 +611,12 @@ def data_fetch_loop():
     while True:
         try:
             running = get_game_status()
-            if not running:
+            if running is None:
+                # APIの一時的な通信失敗中は最後の回転設定を維持する。
+                time.sleep(1)
+                continue
+
+            if running is False:
                 with rotation_settings_lock:
                     rotation_settings.clear()
 
@@ -564,8 +672,7 @@ def data_fetch_loop():
                 last_turn = current_turn
 
             if not current_turn or current_turn not in heart_data:
-                with rotation_settings_lock:
-                    rotation_settings.clear()
+                # 心拍・ターン情報の一時欠落では直前の回転を維持する。
                 time.sleep(1)
                 continue
 
@@ -615,8 +722,7 @@ def data_fetch_loop():
                 target_watch = current_turn
 
             if not target_watch or target_watch not in heart_data:
-                with rotation_settings_lock:
-                    rotation_settings.clear()
+                # APIデータの一時欠落では直前の回転を維持する。
                 time.sleep(1)
                 continue
 
@@ -629,9 +735,7 @@ def data_fetch_loop():
             baseline = baseline_references.get(target_watch)
             reference_bpm = comparison_references.get(target_watch)
             if baseline is None or reference_bpm is None:
-                print(f"[WARN] 比較基準無し: target={target_watch} source={comparison_source} （モーター停止）")
-                with rotation_settings_lock:
-                    rotation_settings.clear()
+                print(f"[WARN] 比較基準無し: target={target_watch} source={comparison_source} （直前の回転を維持）")
                 time.sleep(1)
                 continue
 
@@ -669,6 +773,12 @@ def data_fetch_loop():
                 no_attack_fallback_until = 0.0
                 rpm, direction, attackers = apply_attack_effect(current_turn, rpm, direction, attack_status=attack_status)
 
+            direction_preferences = get_rotation_preferences()
+            direction, immediate_direction = apply_rotation_preferences(
+                direction,
+                direction_preferences,
+            )
+
             attack_context = {
                 "attack_mode": bool(attack_status.get("attack_mode")),
                 "challenge_direction": attack_status.get("challenge_direction"),
@@ -680,7 +790,7 @@ def data_fetch_loop():
             with rotation_settings_lock:
                 rotation_settings.clear()
                 if rpm > 0:
-                    rotation_settings[current_turn] = (rpm, direction)
+                    rotation_settings[current_turn] = (rpm, direction, immediate_direction)
 
             displayed_references = get_displayed_references(
                 mode,
@@ -715,30 +825,45 @@ def data_fetch_loop():
 # 回転ループ
 # --------------------
 def rotation_loop():
+    last_logged_items = None
+    current_step_delay = None
+    current_direction = None
     while True:
         try:
             with rotation_settings_lock:
                 items = list(rotation_settings.items())
 
             if not items:
+                current_step_delay = None
+                current_direction = None
                 # これがずっと出るなら「rotation_settingsが空」
                 # → data_fetch_loop側が毎回clearしてる/ターン不一致/heart_data欠落 など
                 # print("[ROT] no items")
                 time.sleep(0.05)
                 continue
 
-            # 回転対象が増えたときだけ簡潔に表示する。
-            if len(items) > 0:
-                print(f"[ROT] active={len(items)}")
+            # 同じ設定をバッチごとに出力するとログI/Oでステップ周期が乱れるため、
+            # RPM・方向・対象が変わった時だけ表示する。
+            current_items = tuple(items)
+            if current_items != last_logged_items:
+                print(f"[ROT] active={len(items)} settings={current_items}")
+                last_logged_items = current_items
 
-            for device_id, (rpm, direction) in items:
-                # RPMを1ステップごとの待機時間へ変換する。
-                # STEP_DELAY_MULTIPLIER と MIN_STEP_DELAY は実機の回転感・安定性を調整する値。
-                step_delay = (60 / rpm) / stepsPerRevolution
-                safe_step_delay = max(step_delay * STEP_DELAY_MULTIPLIER, MIN_STEP_DELAY)
+            for device_id, (rpm, direction, immediate_direction) in items:
+                # RPMをハーフステップ間隔へ変換する。
+                target_step_delay = calculate_step_delay(rpm)
+                if direction != current_direction:
+                    # 5秒キープ時は安定重視で低速から反転する。
+                    # 即時切替時は現在速度のまま、次バッチ（最大16ステップ）で反転する。
+                    if not immediate_direction:
+                        current_step_delay = max(target_step_delay, STARTUP_STEP_DELAY)
+                    current_direction = direction
+                current_step_delay = approach_step_delay(
+                    current_step_delay,
+                    target_step_delay,
+                )
                 if rpm > 0:
-                    print(f"[ROT] {device_id} rpm={rpm} dir={direction}")
-                rotary(direction, safe_step_delay)
+                    rotary(direction, current_step_delay)
 
         except KeyboardInterrupt:
             GPIO.cleanup()

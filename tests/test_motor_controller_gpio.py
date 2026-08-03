@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -26,6 +27,63 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
         finally:
             motor_controller.GPIO = original_gpio
             motor_controller.gpio_ready = original_ready
+
+    def test_step_delay_uses_half_step_count(self):
+        for rpm, delay in motor_controller.RPM_STEP_DELAYS.items():
+            self.assertEqual(motor_controller.calculate_step_delay(rpm), delay)
+
+    def test_supported_rpms_produce_different_speeds(self):
+        delays = [
+            motor_controller.calculate_step_delay(rpm)
+            for rpm in (10, 20, 30, 40)
+        ]
+        self.assertEqual(delays, sorted(delays, reverse=True))
+        self.assertEqual(len(set(delays)), 4)
+
+    def test_acceleration_approaches_target_without_jumping(self):
+        start = motor_controller.STARTUP_STEP_DELAY
+        target = motor_controller.RPM_STEP_DELAYS[40]
+        next_delay = motor_controller.approach_step_delay(start, target)
+        self.assertLess(next_delay, start)
+        self.assertGreater(next_delay, target)
+
+    def test_immediate_direction_setting_changes_without_hold(self):
+        motor_controller.applied_direction = "c"
+        motor_controller.applied_direction_changed_at = 100.0
+        with patch.object(motor_controller.random, "choice", return_value="a"):
+            direction, immediate = motor_controller.apply_rotation_preferences(
+                "c", {"direction": "auto", "hold": False}, now=100.1
+            )
+        self.assertEqual(direction, "a")
+        self.assertTrue(immediate)
+
+    def test_hold_setting_keeps_direction_for_five_seconds(self):
+        motor_controller.applied_direction = "c"
+        motor_controller.applied_direction_changed_at = 100.0
+        with patch.object(motor_controller.random, "choice", return_value="a"):
+            direction, immediate = motor_controller.apply_rotation_preferences(
+                "c", {"direction": "auto", "hold": True}, now=102.0
+            )
+        self.assertEqual(direction, "c")
+        self.assertFalse(immediate)
+
+    def test_hold_setting_allows_random_change_after_five_seconds(self):
+        motor_controller.applied_direction = "c"
+        motor_controller.applied_direction_changed_at = 100.0
+        with patch.object(motor_controller.random, "choice", return_value="a"):
+            direction, immediate = motor_controller.apply_rotation_preferences(
+                "c", {"direction": "auto", "hold": True}, now=105.0
+            )
+        self.assertEqual(direction, "a")
+        self.assertEqual(motor_controller.applied_direction_changed_at, 105.0)
+        self.assertFalse(immediate)
+
+    def test_step_delay_is_clamped_for_stability(self):
+        self.assertEqual(
+            motor_controller.calculate_step_delay(1000),
+            motor_controller.MIN_STEP_DELAY,
+        )
+        self.assertIsNone(motor_controller.calculate_step_delay(0))
 
 
 if __name__ == "__main__":
