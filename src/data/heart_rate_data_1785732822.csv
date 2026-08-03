@@ -1,0 +1,2 @@
+timestamp,device_id,heartbeat,baseline,diff,abs_diff,game_phase,current_turn,control_mode,random_extreme,target_watch,is_target,rpm,direction,source_timestamp,collapse,attackers,attack_count,attack_mode,challenge_direction
+1785732814063,watch1,,,,,playing,watch1,,,,,,,,倒壊,,,,

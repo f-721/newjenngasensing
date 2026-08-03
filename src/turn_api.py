@@ -2,11 +2,16 @@ from flask import Blueprint, jsonify
 import json
 import os
 import threading
+from score_logic import apply_points, normalize_scores, turn_scoring_targets
 
 turn_api = Blueprint('turn_api', __name__)
 
 TURN_FILE = 'turn.json'
 ASSIGNED_FILE = 'assigned_ids.json'
+ROTATION_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rotation_status.json')
+SCORES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scores.json')
+CONTROL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'control_mode.json')
+ATTACK_SUCCESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attack_success.json')
 file_lock = threading.Lock()
 
 # -------------------------
@@ -39,6 +44,18 @@ def save_current_turn(turn, advance=False):
         turn_number += 1
     save_json_file(TURN_FILE, {"current_turn": turn, "turn_number": turn_number})
 
+
+def award_turn_scores(current_turn):
+    targets = turn_scoring_targets(
+        load_json_file(CONTROL_FILE).get("mode"),
+        load_json_file(ROTATION_STATUS_FILE),
+        load_json_file(ATTACK_SUCCESS_FILE),
+        current_turn,
+    )
+    if targets:
+        scores = apply_points(normalize_scores(load_json_file(SCORES_FILE)), targets, 1)
+        save_json_file(SCORES_FILE, scores)
+
 # -------------------------
 # APIルート
 # -------------------------
@@ -67,6 +84,8 @@ def next_turn():
         next_index = (current_index + 1) % len(all_ids)
 
     next_id = all_ids[next_index]
+    if current != next_id:
+        award_turn_scores(current)
     save_current_turn(next_id, advance=True)
 
     print()

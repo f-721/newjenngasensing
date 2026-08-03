@@ -8,6 +8,7 @@ import random
 import re
 import tempfile
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from score_logic import apply_points, normalize_scores, turn_scoring_targets
 
 from heart_api import heart_api
 from turn_api import turn_api
@@ -34,6 +35,7 @@ BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 CONTROL_FILE = "control_mode.json"
 ROTATION_SETTINGS_FILE = os.path.join(BASE_DIR, "rotation_settings.json")
 ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
+SCORES_FILE = os.path.join(BASE_DIR, "scores.json")
 ATTACK_TARGETS_FILE = os.path.join(BASE_DIR, "attack_targets.json")
 ATTACK_ROUND_FILE = os.path.join(BASE_DIR, "attack_round.json")
 ATTACK_PENDING_FILE = os.path.join(BASE_DIR, "attack_pending.json")
@@ -46,6 +48,7 @@ CSV_COLUMNS = [
     "game_phase", "current_turn", "control_mode", "random_extreme",
     "target_watch", "is_target", "rpm", "direction", "source_timestamp", "collapse",
     "attackers", "attack_count", "attack_mode", "challenge_direction",
+    "score", "score_change", "score_reason",
 ]
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
 # ゲーム用: 妨害チャレンジのノルマ心拍を決める設定。
@@ -115,6 +118,38 @@ def save_rotation_status(status):
     save_json_file(ROTATION_STATUS_FILE, status, log=False)
 
 
+def load_scores():
+    return normalize_scores(load_json_file(SCORES_FILE))
+
+
+def award_turn_scores(current_turn):
+    control_mode = load_json_file(CONTROL_FILE).get("mode")
+    targets = turn_scoring_targets(
+        control_mode,
+        load_json_file(ROTATION_STATUS_FILE),
+        load_attack_success(),
+        current_turn,
+    )
+    if targets:
+        scores = apply_points(load_scores(), targets, 1)
+        save_json_file(SCORES_FILE, scores, log=False)
+        timestamp = int(time.time() * 1000)
+        reason = "妨害チャレンジ成功" if control_mode == "attack_challenge" else "上昇・下降モードで心拍採用"
+        history = load_csv_history()
+        history.extend({
+            "timestamp": timestamp,
+            "device_id": watch_id,
+            "game_phase": "playing",
+            "current_turn": current_turn or "",
+            "control_mode": control_mode or "",
+            "score": scores[watch_id],
+            "score_change": 1,
+            "score_reason": reason,
+        } for watch_id in sorted(targets))
+        save_json_file(CSV_HISTORY_FILE, history, log=False)
+    return sorted(targets)
+
+
 def load_csv_history():
     history = load_json_file(CSV_HISTORY_FILE)
     if isinstance(history, list):
@@ -173,6 +208,9 @@ def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None, attack
             "attack_count": attack_count,
             "attack_mode": attack_mode,
             "challenge_direction": challenge_direction,
+            "score": load_scores().get(device_id, 0),
+            "score_change": "",
+            "score_reason": "",
         })
 
     if rows:
@@ -532,6 +570,7 @@ def start_game():
         "current_turn": ids[0] if ids else None,
         "turn_number": 1 if ids else 0,
     })
+    save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in ids}, log=False)
 
     print("[GAME START] baseline完全一致 → 開始")
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
@@ -574,6 +613,7 @@ def reset_server():
     save_json_file(TURN_FILE, {"current_turn": None, "turn_number": 0})
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
+    save_json_file(SCORES_FILE, {}, log=False)
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
@@ -597,6 +637,8 @@ def reset_game_only():
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
     save_json_file(ROTATION_SETTINGS_FILE, {"direction": "auto", "hold": True}, log=False)
     save_json_file(ROTATION_STATUS_FILE, {}, log=False)
+    assigned_watches = set(load_json_file(ASSIGNED_FILE).values())
+    save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in assigned_watches}, log=False)
     return jsonify({"status": "ok", "message": "ゲーム状態を完全にリセットしました"})
 
 @app.route("/assign_id")
@@ -640,6 +682,11 @@ def set_turn():
     turn_state = load_json_file(TURN_FILE)
     turn_number = turn_state.get("turn_number", 0)
     if turn_state.get("current_turn") != new_turn:
+        current_turn = turn_state.get("current_turn")
+        if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
+            # Capture a challenge completed immediately before the turn button was pressed.
+            resolve_attack_challenge()
+        award_turn_scores(current_turn)
         turn_number += 1
     save_json_file(TURN_FILE, {
         "current_turn": new_turn,
@@ -647,6 +694,44 @@ def set_turn():
     })
     print(f"[API] 管理者操作: ターンを {new_turn} に設定しました")
     return jsonify({"status": "ok", "message": f"{new_turn} に設定しました"})
+
+
+@app.route('/scores', methods=['GET'])
+def get_scores():
+    scores = load_scores()
+    for watch_id in set(load_json_file(ASSIGNED_FILE).values()):
+        scores.setdefault(watch_id, 0)
+    return jsonify(scores)
+
+
+@app.route('/collapse', methods=['POST'])
+def record_collapse():
+    game_status = load_json_file(GAME_STATUS_FILE)
+    if not game_status.get("running", False):
+        return jsonify({"status": "error", "message": "ゲームを開始してください"}), 400
+
+    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    if not current_turn:
+        return jsonify({"status": "error", "message": "現在の手番が設定されていません"}), 400
+
+    data = request.get_json(silent=True) or {}
+    scores = apply_points(load_scores(), [current_turn], -100)
+    save_json_file(SCORES_FILE, scores, log=False)
+
+    # Exported data keeps a lightweight collapse marker as well.
+    history = load_csv_history()
+    history.append({
+        "timestamp": int(time.time() * 1000),
+        "device_id": current_turn,
+        "game_phase": "playing",
+        "current_turn": current_turn,
+        "collapse": data.get("notes") or data.get("message") or "倒壊",
+        "score": scores[current_turn],
+        "score_change": -100,
+        "score_reason": "倒壊",
+    })
+    save_json_file(CSV_HISTORY_FILE, history, log=False)
+    return jsonify({"status": "ok", "watch_id": current_turn, "score": scores[current_turn]})
 
 @app.route('/reconnect', methods=['POST'])
 def reconnect():
@@ -835,7 +920,13 @@ def set_rotation_hold():
 
 @app.route("/set_control_mode", methods=["POST"])
 def set_control_mode():
-    data = request.get_json()
+    if load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({
+            "status": "error",
+            "message": "ゲーム中はモーター制御モードを変更できません"
+        }), 409
+
+    data = request.get_json(silent=True) or {}
     mode = data.get("mode", "self_fast")
 
     allowed_modes = {

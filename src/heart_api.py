@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+import tempfile
 from datetime import datetime
 
 
@@ -15,6 +16,11 @@ DATA_FILE = os.path.join(BASE_DIR, 'heart_rates.json')
 HISTORY_FILE = os.path.join(BASE_DIR, 'heart_history.json')
 TURN_FILE = os.path.join(BASE_DIR, 'turn.json')
 GAME_FILE = os.path.join(BASE_DIR, "game_status.json")
+BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
+CONTROL_FILE = os.path.join(BASE_DIR, "control_mode.json")
+ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
+CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
+SCORES_FILE = os.path.join(BASE_DIR, "scores.json")
 
 # デバイスごとの最新保存タイムスタンプを記録
 latest_timestamps = {}
@@ -53,6 +59,71 @@ def save_json_file(filename, data):
             f.flush()
             os.fsync(f.fileno())
 
+
+def append_game_csv_heart(device_id, heartbeat, timestamp):
+    """Keep raw game heartbeats even when no motor status callback arrives."""
+    game = load_json_file(GAME_FILE)
+    if not game.get("running", False):
+        return
+
+    turn = load_json_file(TURN_FILE)
+    baselines = load_json_file(BASELINE_FILE)
+    scores = load_json_file(SCORES_FILE)
+    rotation = load_json_file(ROTATION_STATUS_FILE)
+    control_mode = load_json_file(CONTROL_FILE).get("mode", "")
+    matching = next((info for info in rotation.values()
+                     if isinstance(info, dict) and info.get("target_watch") == device_id), {})
+    baseline = baselines.get(device_id, "")
+    try:
+        diff = float(heartbeat) - float(baseline)
+        abs_diff = abs(diff)
+    except (TypeError, ValueError):
+        diff = abs_diff = ""
+
+    row = {
+        "timestamp": timestamp,
+        "device_id": device_id,
+        "heartbeat": heartbeat,
+        "baseline": baseline,
+        "diff": diff,
+        "abs_diff": abs_diff,
+        "game_phase": "playing",
+        "current_turn": turn.get("current_turn", ""),
+        "control_mode": control_mode,
+        "random_extreme": {"up": "上昇", "down": "下降"}.get(matching.get("extreme"), ""),
+        "target_watch": matching.get("target_watch", ""),
+        "is_target": bool(matching),
+        "rpm": matching.get("rpm", ""),
+        "direction": matching.get("direction", ""),
+        "source_timestamp": timestamp,
+        "collapse": "",
+        "attackers": ",".join(matching.get("attackers", [])),
+        "attack_count": matching.get("attack_count", ""),
+        "attack_mode": "attack_challenge" if matching.get("attack_mode") else "",
+        "challenge_direction": matching.get("challenge_direction", ""),
+        "score": scores.get(device_id, 0),
+        "score_change": "",
+        "score_reason": "",
+    }
+
+    with file_lock:
+        history = []
+        if os.path.exists(CSV_HISTORY_FILE):
+            try:
+                with open(CSV_HISTORY_FILE, encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+                    if isinstance(loaded, list):
+                        history = loaded
+            except (json.JSONDecodeError, OSError):
+                history = []
+        history.append(row)
+        with tempfile.NamedTemporaryFile(mode="w", dir=BASE_DIR, delete=False, encoding="utf-8") as handle:
+            temporary_path = handle.name
+            json.dump(history, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, CSV_HISTORY_FILE)
+
 # ----------------------------------------
 # 🔴 POST /heart（通常保存）
 # ----------------------------------------
@@ -89,6 +160,8 @@ def post_heart():
         })
         history[device_id] = history[device_id][-30:]
         save_json_file(HISTORY_FILE, history)
+
+        append_game_csv_heart(device_id, heartbeat, timestamp)
 
         print(f"[{datetime.now()}] 🔴 保存: {device_id}, BPM={heartbeat}, timestamp={timestamp}")
 

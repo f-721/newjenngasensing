@@ -288,6 +288,22 @@ select {
   margin: 0 0 10px;
 }
 
+.score-board {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.score-item {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #d8dee9;
+  font-weight: bold;
+}
+
 .chart-wrapper {
   position: relative;
   width: 100%;
@@ -393,6 +409,7 @@ select {
       intervalId = setInterval(() => {
         fetchHeartRate();
         refreshCurrentTurn();
+        refreshScores();
       }, 1000);
       document.getElementById('status').innerText = '状態: 取得中';
       localStorage.setItem("fetchingStatus", "running");
@@ -467,6 +484,7 @@ select {
         const data = await res.json();
         console.log('[DEBUG] /status data:', data); // ← デバッグ用
         document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
+        await updateModeButtons(data.running);
       } catch (error) {
         console.error(error);
         document.getElementById('game-status').innerText = 'ゲーム状態： 取得失敗';
@@ -625,6 +643,21 @@ async function refreshCurrentTurn() {
       }
     }
 
+async function refreshScores() {
+  try {
+    const res = await fetch('/scores', { cache: 'no-store' });
+    if (!res.ok) throw new Error('score fetch failed');
+    const scores = await res.json();
+    const board = document.getElementById('score-board');
+    board.innerHTML = Object.entries(scores)
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(([watchId, score]) => `<div class="score-item">${watchId}: ${score}点</div>`)
+      .join('');
+  } catch (error) {
+    console.error(error);
+  }
+}
+
     function calculateSelectedBaseline() {
   calculateBaseline();
 }
@@ -698,6 +731,7 @@ async function loadBaselineToUI() {
         .then(data => {
           alert(data.message);
           refreshCurrentTurn();
+          refreshScores();
         })
         .catch(err => console.error(err));
     }
@@ -728,6 +762,7 @@ async function loadBaselineToUI() {
         }
 
         refreshCurrentTurn();
+        refreshScores();
 
       } catch (e) {
         console.error(e);
@@ -792,6 +827,7 @@ async function recordCollapse() {
       statusEl.innerText = "✓ 倒壊を記録しました";
       statusEl.style.color = "#4caf50";
       document.getElementById("collapseNotes").value = "";
+      await refreshScores();
       
       setTimeout(() => {
         statusEl.innerText = "";
@@ -845,6 +881,7 @@ window.addEventListener("load", async () => {
 
   await refreshGameStatus();
   await refreshCurrentTurn();
+  await refreshScores();
   await refreshCurrentTarget();
   await refreshClientList();
   await setupGraphs();
@@ -978,30 +1015,9 @@ function startHeartDataLoop() {
   heartDataInterval = setInterval(fetchHeartData, 1000); // 1秒ごとにデータ取得
 }
 
-    document.addEventListener('keydown', async (event) => {
+document.addEventListener('keydown', async (event) => {
       if (event.key === 'Enter') {
-        try {
-          const turnRes = await fetch("/turn");
-          const turnData = await turnRes.json();
-          const currentTurnId = turnData.current_turn;
-          if (!currentTurnId) return alert("現在のターンIDが取得できません");
-
-          const res = await fetch("/next_turn", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ end_turn: currentTurnId })
-          });
-
-          const data = await res.json();
-          if (res.ok) {
-            await refreshCurrentTurn();
-          } else {
-            alert("ターン終了失敗: " + (data.error || data.message));
-          }
-        } catch (e) {
-          console.error(e);
-          alert("エラーが発生しました");
-        }
+        await nextTurn();
       }
     });
 
@@ -1328,22 +1344,33 @@ function showBanner(message) {
   }, 2000);
 }
 
-async function updateModeButtons() {
+async function updateModeButtons(runningOverride = null) {
   try {
-    const res = await fetch("/clients");
-    const data = await res.json();
+    const requests = [fetch("/clients")];
+    if (runningOverride === null) requests.push(fetch('/status', { cache: 'no-store' }));
+    const responses = await Promise.all(requests);
+    const data = await responses[0].json();
+    const running = runningOverride === null
+      ? Boolean((await responses[1].json()).running)
+      : Boolean(runningOverride);
     const count = data.count || 0;
 
     const otherButtons = document.querySelectorAll(".requires-two");
+    const modeButtons = document.querySelectorAll('button[onclick^="setMode("]');
     const note = document.getElementById("other-mode-note");
 
     const canUseOtherMode = count >= 2;
 
+    modeButtons.forEach(btn => {
+      btn.disabled = running;
+    });
     otherButtons.forEach(btn => {
-      btn.disabled = !canUseOtherMode;
+      btn.disabled = running || !canUseOtherMode;
     });
 
-    if (canUseOtherMode) {
+    if (running) {
+      note.innerText = 'ゲーム中はモーター制御モードを変更できません';
+    } else if (canUseOtherMode) {
       note.innerText = `接続台数: ${count}台 → 他人の心拍モード使用可`;
     } else {
       note.innerText = `接続台数: ${count}台 → 他人の心拍モードは2台以上で使用可能`;
@@ -1416,6 +1443,7 @@ async function resetGameOnly() {
     <div class="status-card">
       <div id="turn-display-large">全員受付中</div>
       <div id="current-turn"></div>
+      <div id="score-board" class="score-board"></div>
 
       <div class="status-row">
         <div id="status" class="status-badge">状態: 未設定</div>
