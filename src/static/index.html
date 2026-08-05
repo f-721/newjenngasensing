@@ -304,6 +304,23 @@ select {
   font-weight: bold;
 }
 
+.game-score-history {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.game-score-history-item {
+  background: #fff8e1;
+  border: 1px solid #ffcc80;
+  border-radius: 9px;
+  padding: 6px 10px;
+  font-size: 0.86em;
+  font-weight: bold;
+}
+
 .chart-wrapper {
   position: relative;
   width: 100%;
@@ -493,7 +510,7 @@ select {
 
 async function startGame() {
   try {
-    const res = await fetch("/start", { method: "POST" });
+    const res = await fetch("/start?mode=jenga", { method: "POST" });
     const data = await res.json();
     if (res.ok) {
       alert("ゲームを開始しました");
@@ -510,6 +527,78 @@ async function startGame() {
   }
 }
 
+async function nextJengaGame() {
+  const button = document.getElementById("nextGameBtn");
+  button.disabled = true;
+  let gameSwitched = false;
+  try {
+    const statusRes = await fetch("/status", { cache: "no-store" });
+    const status = await statusRes.json();
+    if (status.running) {
+      alert("ゲーム中です。先に「終了」ボタンでゲームを終了してください");
+      return;
+    }
+
+    if (!confirm("現在の得点を維持して、次のゲームへ進みますか？")) return;
+
+    const res = await fetch("/next_jenga_game", { method: "POST" });
+    const responseText = await res.text();
+    let data = {};
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      data = { message: responseText };
+    }
+    if (!res.ok) {
+      const fallback = res.status === 404
+        ? "サーバーへ新しいプログラムが反映されていません。サーバーを再起動してください"
+        : `次のゲームへの切り替えに失敗しました（${res.status}）`;
+      alert(data.message || fallback);
+      return;
+    }
+
+    gameSwitched = true;
+    isGameRunning = true;
+    Object.keys(maxHeartRates).forEach(watchId => delete maxHeartRates[watchId]);
+    localStorage.removeItem("maxHeartRates");
+    document.getElementById("csvBtn").style.display = "none";
+    await refreshGameStatus();
+    await refreshScores();
+    await refreshJengaSeries();
+    await refreshCurrentTurn();
+    await setupGraphs();
+    startPlotting();
+    alert(`第${data.game_number}ゲームを開始しました（得点は維持されています）`);
+  } catch (e) {
+    console.error(e);
+    alert(gameSwitched
+      ? "次のゲームは開始しましたが、画面の更新に失敗しました。画面を再読み込みしてください"
+      : "次のゲームへの切り替えで通信エラーが発生しました");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function refreshJengaSeries() {
+  try {
+    const res = await fetch("/jenga_series", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById("game-number").innerText = `第${data.game_number || 1}ゲーム`;
+    const history = document.getElementById("game-score-history");
+    const scoreHistory = Array.isArray(data.score_history) ? data.score_history : [];
+    history.innerHTML = scoreHistory.map(result => {
+      const scores = Object.entries(result.scores || {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([watchId, score]) => `${watchId}: ${score}点`)
+        .join(" / ");
+      return `<div class="game-score-history-item">第${result.game_number}ゲーム終了　${scores}</div>`;
+    }).join("");
+  } catch (e) {
+    console.error("連続ゲーム情報の取得に失敗", e);
+  }
+}
+
 async function stopGame() {
   isGameRunning = false;
   try {
@@ -520,7 +609,6 @@ async function stopGame() {
     if (typeof stopPlotting === "function") {
       stopPlotting();
     }
-    stopFetching();        // ✅ データ取得も停止 ← 追加！
     await refreshGameStatus();
     document.getElementById('csvBtn').style.display = 'inline-block';
      const heartEl = document.getElementById("heartRateDisplay");
@@ -882,6 +970,7 @@ window.addEventListener("load", async () => {
   await refreshGameStatus();
   await refreshCurrentTurn();
   await refreshScores();
+  await refreshJengaSeries();
   await refreshCurrentTarget();
   await refreshClientList();
   await setupGraphs();
@@ -1425,6 +1514,8 @@ async function resetGameOnly() {
     const data = await res.json();
 
     if (res.ok) {
+      await refreshScores();
+      await refreshJengaSeries();
       alert("次のゲーム用にリセットしました");
     } else {
       alert(data.message || "ゲームリセットに失敗しました");
@@ -1444,10 +1535,12 @@ async function resetGameOnly() {
       <div id="turn-display-large">全員受付中</div>
       <div id="current-turn"></div>
       <div id="score-board" class="score-board"></div>
+      <div id="game-score-history" class="game-score-history"></div>
 
       <div class="status-row">
         <div id="status" class="status-badge">状態: 未設定</div>
         <div id="game-status" class="status-badge">ゲーム状態: 未設定</div>
+        <div id="game-number" class="status-badge">第1ゲーム</div>
         <div id="watch-count" class="status-badge">接続中のデバイス数: 未取得</div>
         <div id="current-target" class="status-badge">利用対象: 未設定</div>
       </div>
@@ -1462,6 +1555,7 @@ async function resetGameOnly() {
           <h3>ゲーム</h3>
           <button onclick="startGame()">開始</button>
           <button class="stop-button" onclick="stopGame()">終了</button>
+          <button id="nextGameBtn" onclick="nextJengaGame()" style="background-color:#ff9800;">得点を維持して次のゲームへ</button>
           <button class="reset-button" onclick="resetServer()">リセット</button>
           <button onclick="resetGameOnly()">ゲームだけリセット</button>
           <button class="csv-button" onclick="exportCSV()" id="csvBtn" style="display:none;">CSV保存</button>

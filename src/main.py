@@ -43,12 +43,13 @@ ATTACK_CONDITION_FILE = os.path.join(BASE_DIR, "attack_condition.json")
 ATTACK_SUCCESS_FILE = os.path.join(BASE_DIR, "attack_success.json")
 CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
 LIVE_CSV_FILE = os.path.join(BASE_DIR, "live_rotation.csv")
+JENGA_SERIES_FILE = os.path.join(BASE_DIR, "jenga_series.json")
 CSV_COLUMNS = [
     "timestamp", "device_id", "heartbeat", "baseline", "diff", "abs_diff",
     "game_phase", "current_turn", "control_mode", "random_extreme",
     "target_watch", "is_target", "rpm", "direction", "source_timestamp", "collapse",
     "attackers", "attack_count", "attack_mode", "challenge_direction",
-    "score", "score_change", "score_reason",
+    "score", "score_change", "score_reason", "series_id", "game_number",
 ]
 CSV_INTEGER_COLUMNS = {"heartbeat", "baseline", "diff", "abs_diff", "rpm"}
 # ゲーム用: 妨害チャレンジのノルマ心拍を決める設定。
@@ -122,6 +123,29 @@ def load_scores():
     return normalize_scores(load_json_file(SCORES_FILE))
 
 
+def load_jenga_series():
+    state = load_json_file(JENGA_SERIES_FILE)
+    if not isinstance(state, dict):
+        state = {}
+    try:
+        game_number = max(1, int(state.get("game_number", 1)))
+    except (TypeError, ValueError):
+        game_number = 1
+    return {
+        "series_id": state.get("series_id"),
+        "game_number": game_number,
+        "active": bool(state.get("active", False)),
+        "score_history": state.get("score_history", []) if isinstance(state.get("score_history", []), list) else [],
+    }
+
+
+def jenga_csv_fields():
+    series = load_jenga_series()
+    if not series["active"]:
+        return {"series_id": "", "game_number": ""}
+    return {"series_id": series["series_id"] or "", "game_number": series["game_number"]}
+
+
 def award_turn_scores(current_turn):
     control_mode = load_json_file(CONTROL_FILE).get("mode")
     targets = turn_scoring_targets(
@@ -145,6 +169,7 @@ def award_turn_scores(current_turn):
             "score": scores[watch_id],
             "score_change": 1,
             "score_reason": reason,
+            **jenga_csv_fields(),
         } for watch_id in sorted(targets))
         save_json_file(CSV_HISTORY_FILE, history, log=False)
     return sorted(targets)
@@ -211,6 +236,7 @@ def record_csv_snapshot(target_watch, mode, rpm, direction, extreme=None, attack
             "score": load_scores().get(device_id, 0),
             "score_change": "",
             "score_reason": "",
+            **jenga_csv_fields(),
         })
 
     if rows:
@@ -572,8 +598,99 @@ def start_game():
     })
     save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in ids}, log=False)
 
+    if request.args.get("mode") == "jenga":
+        save_json_file(JENGA_SERIES_FILE, {
+            "series_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "game_number": 1,
+            "active": True,
+            "score_history": [],
+        }, log=False)
+        if os.path.exists(LIVE_CSV_FILE):
+            with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
+                pass
+
     print("[GAME START] baseline完全一致 → 開始")
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
+
+
+@app.route('/jenga_series', methods=['GET'])
+def get_jenga_series():
+    return jsonify({**load_jenga_series(), "scores": load_scores()})
+
+
+@app.route('/next_jenga_game', methods=['POST'])
+def next_jenga_game():
+    """累計点とCSV履歴を残し、ゲーム内状態だけを初期化して次戦を始める。"""
+    status = load_json_file(GAME_STATUS_FILE)
+    if status.get("running", False):
+        return jsonify({
+            "status": "error",
+            "message": "ゲーム中です。先に「終了」ボタンでゲームを終了してください"
+        }), 409
+
+    assigned_ids = sorted(set(load_json_file(ASSIGNED_FILE).values()), key=get_watch_sort_key)
+    if not assigned_ids:
+        return jsonify({"status": "error", "message": "接続中のWatchがありません"}), 400
+
+    baselines = load_json_file(BASELINE_FILE)
+    missing = [watch_id for watch_id in assigned_ids if watch_id not in baselines]
+    if missing:
+        return jsonify({"status": "error", "message": "平均値が未取得です: " + ", ".join(missing)}), 400
+
+    series = load_jenga_series()
+    if not series["active"] or not series["series_id"]:
+        # 機能追加前に開始・終了したゲームからでも、そのまま第2ゲームへ移れるようにする。
+        series = {
+            "series_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "game_number": 1,
+            "active": True,
+            "score_history": [],
+        }
+    ended_game_number = series["game_number"]
+    scores = load_scores()
+    score_snapshot = {
+        "game_number": ended_game_number,
+        "scores": scores,
+        "recorded_at": int(time.time() * 1000),
+    }
+    series["score_history"].append(score_snapshot)
+    series["game_number"] += 1
+    series["active"] = True
+    save_json_file(JENGA_SERIES_FILE, series, log=False)
+
+    reset_attack_cycle_state()
+    save_json_file(ROTATION_STATUS_FILE, {}, log=False)
+    save_json_file(TURN_FILE, {"current_turn": assigned_ids[0], "turn_number": 1}, log=False)
+    status.update({"running": True, "game_over": False, "baseline_mode": False})
+    save_json_file(GAME_STATUS_FILE, status, log=False)
+
+    history = load_csv_history()
+    for watch_id in assigned_ids:
+        history.append({
+            "timestamp": score_snapshot["recorded_at"],
+            "device_id": watch_id,
+            "game_phase": "game_end",
+            "score": scores.get(watch_id, 0),
+            "score_change": "",
+            "score_reason": f"ジェンガ第{ended_game_number}ゲーム終了時点",
+            "series_id": series["series_id"],
+            "game_number": ended_game_number,
+        })
+    history.append({
+        "timestamp": int(time.time() * 1000),
+        "game_phase": "game_start",
+        "score_reason": f"ジェンガ第{series['game_number']}ゲーム開始",
+        "series_id": series["series_id"],
+        "game_number": series["game_number"],
+    })
+    save_json_file(CSV_HISTORY_FILE, history, log=False)
+    return jsonify({
+        "status": "ok",
+        "game_number": series["game_number"],
+        "scores": scores,
+        "score_history": series["score_history"],
+    })
+
 
 @app.route('/stop', methods=['POST'])
 def stop_game():
@@ -614,6 +731,7 @@ def reset_server():
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(SCORES_FILE, {}, log=False)
+    save_json_file(JENGA_SERIES_FILE, {}, log=False)
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
@@ -639,6 +757,7 @@ def reset_game_only():
     save_json_file(ROTATION_STATUS_FILE, {}, log=False)
     assigned_watches = set(load_json_file(ASSIGNED_FILE).values())
     save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in assigned_watches}, log=False)
+    save_json_file(JENGA_SERIES_FILE, {}, log=False)
     return jsonify({"status": "ok", "message": "ゲーム状態を完全にリセットしました"})
 
 @app.route("/assign_id")
@@ -729,6 +848,7 @@ def record_collapse():
         "score": scores[current_turn],
         "score_change": -100,
         "score_reason": "倒壊",
+        **jenga_csv_fields(),
     })
     save_json_file(CSV_HISTORY_FILE, history, log=False)
     return jsonify({"status": "ok", "watch_id": current_turn, "score": scores[current_turn]})
@@ -780,6 +900,7 @@ def export_csv():
 
     # クライアントにファイル送信（ダウンロード）
     return send_file(filepath, as_attachment=True, download_name="heart_rate_data.csv")
+
 
 @app.route("/get_control_mode")
 def get_control_mode():

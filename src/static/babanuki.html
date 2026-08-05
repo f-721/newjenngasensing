@@ -25,7 +25,7 @@
     }
 
     .dashboard {
-      max-width: 1200px;
+      max-width: 1366px;
       margin: 0 auto;
     }
 
@@ -130,8 +130,18 @@
 
     .graph-container {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 12px;
+      grid-template-columns: minmax(220px, 1fr) minmax(330px, 1.35fr) minmax(220px, 1fr);
+      grid-template-rows: minmax(190px, auto) minmax(230px, auto) minmax(190px, auto);
+      grid-template-areas:
+        ". north ."
+        "west center east"
+        ". south .";
+      gap: 14px;
+      align-items: center;
+      min-height: 720px;
+      padding: 18px;
+      border-radius: 28px;
+      background: radial-gradient(circle at center, #f9fbfd 0 29%, #dce8ef 30% 31%, #edf3f7 32% 100%);
     }
 
     .watch-graph {
@@ -140,7 +150,48 @@
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.07);
       padding: 12px;
+      transform-origin: center;
     }
+
+    .watch-graph.seat-north { grid-area: north; transform: rotate(180deg); }
+    .watch-graph.seat-east  { grid-area: east; transform: rotate(-90deg); }
+    .watch-graph.seat-south { grid-area: south; }
+    .watch-graph.seat-west  { grid-area: west; transform: rotate(90deg); }
+
+    .table-center {
+      grid-area: center;
+      position: relative;
+      z-index: 2;
+      background: #17324d;
+      color: white;
+      border-radius: 999px;
+      min-height: 225px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      box-shadow: 0 12px 30px rgba(23, 50, 77, 0.25);
+    }
+
+    .table-center h3 { color: #b9d9ed; }
+    .table-center .turn-big { font-size: clamp(26px, 3vw, 44px); }
+    .table-center .baseline-mini { color: #fff; font-size: 16px; }
+    .table-center button { padding: 11px 18px; }
+
+    .baseline-action {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #e3e8ec;
+    }
+
+    .baseline-action button { margin: 0; padding: 7px 10px; font-size: 12px; }
+    .baseline-value { font-weight: 800; font-size: 13px; }
 
     .watch-head {
       display: flex;
@@ -232,6 +283,21 @@
         border-bottom: 1px solid #ddd;
         padding-bottom: 10px;
       }
+
+      .graph-container {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto;
+        grid-template-areas: "center center" "north east" "west south";
+        min-height: 0;
+        background: #edf3f7;
+      }
+
+      .watch-graph.seat-north,
+      .watch-graph.seat-east,
+      .watch-graph.seat-south,
+      .watch-graph.seat-west { transform: none; }
+
+      .table-center { border-radius: 24px; min-height: 150px; }
     }
 
     .watch-graph.alert {
@@ -247,6 +313,11 @@
   display: grid;
   grid-template-columns: 1.2fr 1fr 1.3fr;
   gap: 12px;
+}
+
+.game-state-card.table-details {
+  margin-top: 14px;
+  grid-template-columns: 1fr 1fr;
 }
 
 .turn-big {
@@ -369,27 +440,28 @@
     <div class="card">
       <h2 class="graph-title">心拍数グラフ（30秒表示）</h2>
 
-      <div class="card game-state-card">
-  <div>
-    <h3>現在の行動</h3>
-    <div id="turn-action" class="turn-big">--</div>
-    <div id="draw-target" class="baseline-mini">カードを引く相手: --</div>
-    <button onclick="nextBabanukiTurn()">次のターンへ</button>
-  <button onclick="resetBabanukiLocal()">上がり状態リセット</button>
-  </div>
+      <div id="graph-area" class="graph-container">
+        <div class="table-center">
+          <h3>現在の行動</h3>
+          <div id="turn-action" class="turn-big">--</div>
+          <div id="draw-target" class="baseline-mini">カードを引く相手: --</div>
+          <div>
+            <button onclick="nextBabanukiTurn()">次のターンへ</button>
+            <button onclick="resetBabanukiLocal()" class="stop-button">上がり状態リセット</button>
+          </div>
+        </div>
+      </div>
 
-  <div>
-    <h3>プレイヤー状態</h3>
-    <div id="player-state-area"></div>
-  </div>
-
-  <div>
-    <h3>ゲームログ</h3>
-    <div id="game-log" class="log-box"></div>
-  </div>
-</div>
-
-      <div id="graph-area" class="graph-container"></div>
+      <div class="card game-state-card table-details">
+        <div>
+          <h3>プレイヤー状態</h3>
+          <div id="player-state-area"></div>
+        </div>
+        <div>
+          <h3>ゲームログ</h3>
+          <div id="game-log" class="log-box"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -598,6 +670,9 @@ async function refreshBabanukiState() {
         div.id = `baseline-${deviceId}`;
         div.innerText = `${deviceId} の平均値：${Math.round(avg)} BPM`;
         area.appendChild(div);
+
+        const cardValue = $(`card-baseline-${deviceId}`);
+        if (cardValue) cardValue.innerText = `基準平均: ${Math.round(avg)} BPM`;
       });
 
       updateBaselineStatus();
@@ -654,14 +729,19 @@ async function refreshBabanukiState() {
     btn.textContent = "ゲーム開始";
   }
 
-  async function calculateBaseline() {
-    const selectedId = $("baselineSelector").value;
+  async function calculateBaseline(deviceId) {
+    const selectedId = deviceId || $("baselineSelector").value;
     if (!selectedId) {
       alert("デバイスIDが選択されていません");
       return;
     }
 
     const resultEl = $("baseline-result");
+    const cardResultEl = $(`card-baseline-${selectedId}`);
+    const showResult = text => {
+      resultEl.innerText = text;
+      if (cardResultEl) cardResultEl.innerText = text;
+    };
 
     if (baselineTimers[selectedId]) {
       clearTimeout(baselineTimers[selectedId]);
@@ -673,11 +753,11 @@ async function refreshBabanukiState() {
       await new Promise(r => setTimeout(r, 1000));
 
       let countdown = 10;
-      resultEl.innerText = `${selectedId} の平均値取得中... (${countdown}秒)`;
+      showResult(`平均を計測中… ${countdown}秒`);
 
       baselineIntervals[selectedId] = setInterval(() => {
         countdown--;
-        resultEl.innerText = `${selectedId} の平均値取得中... (${countdown}秒)`;
+        showResult(`平均を計測中… ${countdown}秒`);
       }, 1000);
 
       baselineTimers[selectedId] = setTimeout(async () => {
@@ -690,7 +770,7 @@ async function refreshBabanukiState() {
         const data = await res.json();
 
         if (res.ok) {
-          resultEl.innerText = `${selectedId} の平均値取得完了`;
+          showResult(`平均値: ${Math.round(data.average)} BPM`);
           await loadBaselines();
           await updateStartButton();
 
@@ -698,8 +778,7 @@ async function refreshBabanukiState() {
             resultEl.innerText = "";
           }, 3000);
         } else {
-          resultEl.innerText =
-            `${selectedId} の平均値取得に失敗：${data.message || data.error || "エラー"}`;
+          showResult(`取得失敗：${data.message || data.error || "エラー"}`);
         }
 
         await fetch("/stop_baseline", { method: "POST" });
@@ -710,7 +789,7 @@ async function refreshBabanukiState() {
 
     } catch (err) {
       console.error(err);
-      resultEl.innerText = "平均値取得エラー";
+      showResult("平均値取得エラー");
     }
   }
 
@@ -734,6 +813,10 @@ async function refreshBabanukiState() {
         <span class="pill" id="recv-${watchId}">受信: --</span>
         <span class="pill" id="max-${watchId}">最大: --</span>
         <span class="pill" id="avg-${watchId}">平均: --</span>
+      </div>
+      <div class="baseline-action">
+        <span class="baseline-value" id="card-baseline-${watchId}">基準平均: ${baselines[watchId] == null ? "未取得" : `${Math.round(baselines[watchId])} BPM`}</span>
+        <button type="button" onclick="calculateBaseline('${watchId}')">自分の平均を取得</button>
       </div>
     `;
 
@@ -790,14 +873,27 @@ async function refreshBabanukiState() {
   async function setupGraphs() {
     await refreshClients();
 
-    $("graph-area").innerHTML = "";
+    const graphArea = $("graph-area");
+    graphArea.querySelectorAll(".watch-graph").forEach(el => el.remove());
 
     Object.keys(charts).forEach(id => {
       charts[id].destroy();
       delete charts[id];
     });
 
-    watchIds.forEach(id => createGraph(id));
+    const seatOrders = {
+      1: ["south"],
+      2: ["north", "south"],
+      3: ["north", "east", "south"],
+      4: ["north", "east", "south", "west"]
+    };
+    const seats = seatOrders[Math.min(watchIds.length, 4)] || seatOrders[4];
+    watchIds.forEach((id, index) => {
+      createGraph(id);
+      const card = document.querySelector(`[data-watch="${id}"]`);
+      card.classList.add(`seat-${seats[index % seats.length]}`);
+      if (index >= 4) card.style.position = "relative";
+    });
   }
 
   function updateStatsUI(watchId, bpm, sampleTs) {

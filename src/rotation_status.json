@@ -1,17 +1,17 @@
 {
   "watch1": {
-    "target_watch": "watch1",
-    "mode": "self_fast",
+    "target_watch": "watch2",
+    "mode": "random_diff",
     "rpm": 10.0,
-    "direction": "c",
-    "extreme": null,
+    "direction": "a",
+    "extreme": "down",
     "attackers": [],
     "attack_count": 0,
-    "reference_bpm": 66.25,
+    "reference_bpm": 80.9,
     "reference_source": "baseline",
-    "baseline_bpm": 66.25,
+    "baseline_bpm": 80.9,
     "reference_heartbeats": {
-      "watch1": 66.25
+      "watch2": 80.9
     },
     "attack_mode": false,
     "challenge_direction": null,

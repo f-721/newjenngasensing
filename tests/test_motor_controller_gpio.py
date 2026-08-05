@@ -28,6 +28,79 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
             motor_controller.GPIO = original_gpio
             motor_controller.gpio_ready = original_ready
 
+    def test_high_torque_sequence_always_energizes_two_coils(self):
+        self.assertEqual(
+            len(motor_controller.HIGH_TORQUE_SEQUENCE),
+            len(motor_controller.HALF_STEP_SEQUENCE),
+        )
+        self.assertTrue(
+            all(
+                sum(pattern) == 2
+                for pattern in motor_controller.HIGH_TORQUE_SEQUENCE
+            )
+        )
+        self.assertTrue(motor_controller.USE_HIGH_TORQUE_DRIVE)
+
+    def test_rotary_uses_high_torque_sequence_when_requested(self):
+        class FakeGPIO:
+            def __init__(self):
+                self.values = []
+
+            def output(self, pin, value):
+                self.values.append(value)
+
+        original_gpio = motor_controller.GPIO
+        original_ready = motor_controller.gpio_ready
+        original_phase = motor_controller.motor_phase
+        original_deadline = motor_controller.next_step_deadline
+        fake_gpio = FakeGPIO()
+        motor_controller.GPIO = fake_gpio
+        motor_controller.gpio_ready = True
+        motor_controller.motor_phase = 0
+        motor_controller.next_step_deadline = None
+        try:
+            with patch.object(motor_controller.time, "sleep"):
+                motor_controller.rotary(
+                    "c", 0.001, steps=1, high_torque=True
+                )
+            self.assertEqual(sum(fake_gpio.values), 2)
+        finally:
+            motor_controller.GPIO = original_gpio
+            motor_controller.gpio_ready = original_ready
+            motor_controller.motor_phase = original_phase
+            motor_controller.next_step_deadline = original_deadline
+
+    def test_reversal_pause_releases_all_coils(self):
+        class FakeGPIO:
+            def __init__(self):
+                self.outputs = []
+
+            def output(self, pin, value):
+                self.outputs.append((pin, value))
+
+        original_gpio = motor_controller.GPIO
+        original_ready = motor_controller.gpio_ready
+        original_deadline = motor_controller.next_step_deadline
+        fake_gpio = FakeGPIO()
+        motor_controller.GPIO = fake_gpio
+        motor_controller.gpio_ready = True
+        motor_controller.next_step_deadline = 123.0
+        try:
+            with patch.object(motor_controller.time, "sleep") as sleep:
+                motor_controller.pause_motor_for_reversal()
+            self.assertEqual(
+                fake_gpio.outputs,
+                [(pin, 0) for pin in motor_controller.motorPins],
+            )
+            self.assertIsNone(motor_controller.next_step_deadline)
+            sleep.assert_called_once_with(
+                motor_controller.REVERSAL_PAUSE_SECONDS
+            )
+        finally:
+            motor_controller.GPIO = original_gpio
+            motor_controller.gpio_ready = original_ready
+            motor_controller.next_step_deadline = original_deadline
+
     def test_step_delay_uses_half_step_count(self):
         for rpm, delay in motor_controller.RPM_STEP_DELAYS.items():
             self.assertEqual(motor_controller.calculate_step_delay(rpm), delay)
