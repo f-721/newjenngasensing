@@ -8,7 +8,13 @@ import random
 import re
 import tempfile
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from score_logic import apply_points, normalize_scores, turn_scoring_targets
+from score_logic import (
+    ATTACK_SCORING_MODES,
+    apply_points,
+    attack_challenge_score_awards,
+    normalize_scores,
+    turn_scoring_targets,
+)
 
 from heart_api import heart_api
 from turn_api import turn_api
@@ -41,6 +47,7 @@ ATTACK_ROUND_FILE = os.path.join(BASE_DIR, "attack_round.json")
 ATTACK_PENDING_FILE = os.path.join(BASE_DIR, "attack_pending.json")
 ATTACK_CONDITION_FILE = os.path.join(BASE_DIR, "attack_condition.json")
 ATTACK_SUCCESS_FILE = os.path.join(BASE_DIR, "attack_success.json")
+ATTACK_SCORING_FILE = os.path.join(BASE_DIR, "attack_scoring.json")
 CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
 LIVE_CSV_FILE = os.path.join(BASE_DIR, "live_rotation.csv")
 JENGA_SERIES_FILE = os.path.join(BASE_DIR, "jenga_series.json")
@@ -123,6 +130,12 @@ def load_scores():
     return normalize_scores(load_json_file(SCORES_FILE))
 
 
+def load_attack_scoring():
+    scoring = load_json_file(ATTACK_SCORING_FILE)
+    mode = scoring.get("mode") if isinstance(scoring, dict) else None
+    return {"mode": mode if mode in ATTACK_SCORING_MODES else "success"}
+
+
 def load_jenga_series():
     state = load_json_file(JENGA_SERIES_FILE)
     if not isinstance(state, dict):
@@ -148,10 +161,41 @@ def jenga_csv_fields():
 
 def award_turn_scores(current_turn):
     control_mode = load_json_file(CONTROL_FILE).get("mode")
+    attack_success = load_attack_success()
+    if control_mode == "attack_challenge":
+        awards = attack_challenge_score_awards(
+            attack_success,
+            current_turn,
+            load_attack_scoring()["mode"],
+        )
+        if not awards:
+            return []
+
+        scores = load_scores()
+        timestamp = int(time.time() * 1000)
+        history = load_csv_history()
+        for watch_id in sorted(awards):
+            award = awards[watch_id]
+            scores = apply_points(scores, [watch_id], award["points"])
+            history.append({
+                "timestamp": timestamp,
+                "device_id": watch_id,
+                "game_phase": "playing",
+                "current_turn": current_turn or "",
+                "control_mode": control_mode,
+                "score": scores[watch_id],
+                "score_change": award["points"],
+                "score_reason": " / ".join(award["reasons"]),
+                **jenga_csv_fields(),
+            })
+        save_json_file(SCORES_FILE, scores, log=False)
+        save_json_file(CSV_HISTORY_FILE, history, log=False)
+        return sorted(awards)
+
     targets = turn_scoring_targets(
         control_mode,
         load_json_file(ROTATION_STATUS_FILE),
-        load_attack_success(),
+        attack_success,
         current_turn,
     )
     if targets:
@@ -489,12 +533,19 @@ def resolve_attack_challenge():
 
         success = heartbeat >= threshold if condition["direction"] == "up" else heartbeat <= threshold
         if success:
+            reference_bpm, reference_source = attack_reference(attacker, condition)
+            impact = heartbeat - threshold if condition["direction"] == "up" else threshold - heartbeat
             active_targets[attacker] = signal["target"]
             del pending[attacker]
             success_state[attacker] = {
                 "turn": condition.get("turn"),
                 "target": signal.get("target"),
                 "direction": condition.get("direction"),
+                "heartbeat": heartbeat,
+                "reference_bpm": reference_bpm,
+                "reference_source": reference_source,
+                "threshold": threshold,
+                "impact": impact,
             }
             resolved.append(attacker)
 
@@ -731,6 +782,7 @@ def reset_server():
     save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(SCORES_FILE, {}, log=False)
+    save_json_file(ATTACK_SCORING_FILE, {"mode": "success"}, log=False)
     save_json_file(JENGA_SERIES_FILE, {}, log=False)
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
@@ -834,7 +886,7 @@ def record_collapse():
         return jsonify({"status": "error", "message": "現在の手番が設定されていません"}), 400
 
     data = request.get_json(silent=True) or {}
-    scores = apply_points(load_scores(), [current_turn], -100)
+    scores = apply_points(load_scores(), [current_turn], -3)
     save_json_file(SCORES_FILE, scores, log=False)
 
     # Exported data keeps a lightweight collapse marker as well.
@@ -846,7 +898,7 @@ def record_collapse():
         "current_turn": current_turn,
         "collapse": data.get("notes") or data.get("message") or "倒壊",
         "score": scores[current_turn],
-        "score_change": -100,
+        "score_change": -3,
         "score_reason": "倒壊",
         **jenga_csv_fields(),
     })
@@ -908,6 +960,26 @@ def get_control_mode():
         with open(CONTROL_FILE) as f:
             return jsonify(json.load(f))
     return jsonify({"mode": "self_fast"})
+
+
+@app.route('/attack_scoring', methods=['GET'])
+def get_attack_scoring():
+    return jsonify(load_attack_scoring())
+
+
+@app.route('/attack_scoring', methods=['POST'])
+def set_attack_scoring():
+    if load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム中は妨害チャレンジの得点方式を変更できません"}), 409
+    if load_json_file(CONTROL_FILE).get("mode") != "attack_challenge":
+        return jsonify({"status": "error", "message": "妨害チャレンジ選択中のみ得点方式を変更できます"}), 409
+
+    mode = (request.get_json(silent=True) or {}).get("mode")
+    if mode not in ATTACK_SCORING_MODES:
+        return jsonify({"status": "error", "message": "無効な妨害チャレンジ得点方式です"}), 400
+
+    save_json_file(ATTACK_SCORING_FILE, {"mode": mode}, log=False)
+    return jsonify({"status": "ok", "mode": mode})
 
 
 @app.route('/get_rotation_settings')

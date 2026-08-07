@@ -5,7 +5,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import main
 import heart_api
-from score_logic import challenge_successful_watch_ids, scoring_targets, turn_scoring_targets
+from score_logic import (
+    attack_challenge_score_awards,
+    challenge_successful_watch_ids,
+    scoring_targets,
+    turn_scoring_targets,
+)
 
 
 def configure_files(monkeypatch, tmp_path):
@@ -53,6 +58,30 @@ def test_challenge_targets_only_include_successes_from_ending_turn():
     }
     assert challenge_successful_watch_ids(successes, "watch1") == {"watch2"}
     assert turn_scoring_targets("attack_challenge", {}, successes, "watch1") == {"watch2"}
+
+
+def test_attack_challenge_scoring_variants_use_success_impact_for_ending_turn():
+    successes = {
+        "watch2": {"turn": "watch1", "impact": 4},
+        "watch3": {"turn": "watch1", "impact": 1},
+        "watch4": {"turn": "watch2", "impact": 10},
+    }
+
+    assert attack_challenge_score_awards(successes, "watch1", "success") == {
+        "watch2": {"points": 1, "reasons": ["妨害チャレンジ成功"]},
+        "watch3": {"points": 1, "reasons": ["妨害チャレンジ成功"]},
+    }
+    assert attack_challenge_score_awards(successes, "watch1", "impact") == {
+        "watch2": {"points": 5, "reasons": ["妨害チャレンジ成功", "このターンの最大影響度ボーナス"]},
+        "watch3": {"points": 2, "reasons": ["妨害チャレンジ成功"]},
+    }
+    assert attack_challenge_score_awards(successes, "watch1", "ranking") == {
+        "watch2": {"points": 5, "reasons": ["影響度順位ボーナス 5点"]},
+        "watch3": {"points": 3, "reasons": ["影響度順位ボーナス 3点"]},
+    }
+    assert attack_challenge_score_awards(successes, "watch1", "mvp") == {
+        "watch2": {"points": 5, "reasons": ["このターンのMVP"]},
+    }
 
 
 def test_turn_change_adds_one_point_to_used_watch(monkeypatch, tmp_path):

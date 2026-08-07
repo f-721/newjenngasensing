@@ -2,7 +2,13 @@ from flask import Blueprint, jsonify
 import json
 import os
 import threading
-from score_logic import apply_points, normalize_scores, turn_scoring_targets
+from score_logic import (
+    ATTACK_SCORING_MODES,
+    apply_points,
+    attack_challenge_score_awards,
+    normalize_scores,
+    turn_scoring_targets,
+)
 
 turn_api = Blueprint('turn_api', __name__)
 
@@ -12,6 +18,7 @@ ROTATION_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 SCORES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scores.json')
 CONTROL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'control_mode.json')
 ATTACK_SUCCESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attack_success.json')
+ATTACK_SCORING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attack_scoring.json')
 file_lock = threading.Lock()
 
 # -------------------------
@@ -46,10 +53,25 @@ def save_current_turn(turn, advance=False):
 
 
 def award_turn_scores(current_turn):
+    control_mode = load_json_file(CONTROL_FILE).get("mode")
+    attack_success = load_json_file(ATTACK_SUCCESS_FILE)
+    if control_mode == "attack_challenge":
+        scoring = load_json_file(ATTACK_SCORING_FILE)
+        scoring_mode = scoring.get("mode") if isinstance(scoring, dict) else "success"
+        if scoring_mode not in ATTACK_SCORING_MODES:
+            scoring_mode = "success"
+        awards = attack_challenge_score_awards(attack_success, current_turn, scoring_mode)
+        if awards:
+            scores = normalize_scores(load_json_file(SCORES_FILE))
+            for watch_id, award in awards.items():
+                scores = apply_points(scores, [watch_id], award["points"])
+            save_json_file(SCORES_FILE, scores)
+        return
+
     targets = turn_scoring_targets(
-        load_json_file(CONTROL_FILE).get("mode"),
+        control_mode,
         load_json_file(ROTATION_STATUS_FILE),
-        load_json_file(ATTACK_SUCCESS_FILE),
+        attack_success,
         current_turn,
     )
     if targets:

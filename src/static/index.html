@@ -233,6 +233,10 @@ select {
   font-weight: bold;
 }
 
+.attack-scoring-select {
+  min-width: 220px;
+}
+
 .heart-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -945,6 +949,7 @@ window.onload = async () => {
   }
 
 await loadCurrentMode();
+await loadAttackScoring();
 await loadCurrentRotationDirection();
 await loadCurrentRotationHold();
 await updateModeButtons();
@@ -1435,18 +1440,20 @@ function showBanner(message) {
 
 async function updateModeButtons(runningOverride = null) {
   try {
-    const requests = [fetch("/clients")];
+    const requests = [fetch("/clients"), fetch("/get_control_mode")];
     if (runningOverride === null) requests.push(fetch('/status', { cache: 'no-store' }));
     const responses = await Promise.all(requests);
     const data = await responses[0].json();
+    const controlMode = (await responses[1].json()).mode;
     const running = runningOverride === null
-      ? Boolean((await responses[1].json()).running)
+      ? Boolean((await responses[2].json()).running)
       : Boolean(runningOverride);
     const count = data.count || 0;
 
     const otherButtons = document.querySelectorAll(".requires-two");
     const modeButtons = document.querySelectorAll('button[onclick^="setMode("]');
     const note = document.getElementById("other-mode-note");
+    const attackScoringSelector = document.getElementById("attackScoringSelector");
 
     const canUseOtherMode = count >= 2;
 
@@ -1456,6 +1463,7 @@ async function updateModeButtons(runningOverride = null) {
     otherButtons.forEach(btn => {
       btn.disabled = running || !canUseOtherMode;
     });
+    attackScoringSelector.disabled = running || controlMode !== "attack_challenge";
 
     if (running) {
       note.innerText = 'ゲーム中はモーター制御モードを変更できません';
@@ -1488,6 +1496,7 @@ async function setMode(mode) {
 
     const label = getModeLabel(mode);
     document.getElementById("mode-current").innerText = `現在の設定：${label}`;
+    await updateModeButtons();
     showBanner(`モード変更：${label}`);
   } catch (e) {
     console.error(e);
@@ -1503,6 +1512,48 @@ async function loadCurrentMode() {
     document.getElementById("mode-current").innerText = `現在の設定：${label}`;
   } catch (e) {
     console.error("現在モード取得失敗", e);
+  }
+}
+
+function getAttackScoringLabel(mode) {
+  const labels = {
+    success: "成功回数: 成功 +1点",
+    impact: "影響度: 成功 +2点、首位 +3点",
+    ranking: "順位制: 1位 5点 / 2位 3点 / 3位 1点",
+    mvp: "MVP: 最大影響度 +5点"
+  };
+  return labels[mode] || mode;
+}
+
+async function loadAttackScoring() {
+  try {
+    const res = await fetch("/attack_scoring");
+    const data = await res.json();
+    document.getElementById("attackScoringSelector").value = data.mode;
+  } catch (e) {
+    console.error("妨害チャレンジ得点方式取得失敗", e);
+  }
+}
+
+async function setAttackScoring() {
+  const selector = document.getElementById("attackScoringSelector");
+  try {
+    const res = await fetch("/attack_scoring", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: selector.value })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showBanner(data.message || "得点方式の変更に失敗しました");
+      await loadAttackScoring();
+      return;
+    }
+    showBanner(`妨害チャレンジ得点方式: ${getAttackScoringLabel(data.mode)}`);
+  } catch (e) {
+    console.error(e);
+    showBanner("得点方式の変更通信エラー");
+    await loadAttackScoring();
   }
 }
 
@@ -1618,6 +1669,13 @@ async function resetGameOnly() {
             <div class="mode-note">1ターン目は基準値、以後はターン開始時の心拍から比較</div>
             <button class="mode-btn other-btn" onclick="setMode('attack_challenge')">妨害チャレンジ</button>
             <div class="mode-note">妨害信号後、上昇・下降の心拍条件を満たすと妨害成功</div>
+            <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
+            <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
+              <option value="success">成功回数: 成功 +1点</option>
+              <option value="impact">影響度: 成功 +2点、首位 +3点</option>
+              <option value="ranking">順位制: 1位 5点 / 2位 3点 / 3位 1点</option>
+              <option value="mvp">MVP: 最大影響度 +5点</option>
+            </select>
           </div>
 
           <div class="mode-group compact-rotation">
