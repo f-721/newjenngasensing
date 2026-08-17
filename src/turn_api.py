@@ -19,6 +19,7 @@ SCORES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scores.j
 CONTROL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'control_mode.json')
 ATTACK_SUCCESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attack_success.json')
 ATTACK_SCORING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attack_scoring.json')
+JENGA_SERIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jenga_series.json')
 file_lock = threading.Lock()
 
 # -------------------------
@@ -53,6 +54,8 @@ def save_current_turn(turn, advance=False):
 
 
 def award_turn_scores(current_turn):
+    if load_json_file(JENGA_SERIES_FILE).get("active", False):
+        return
     control_mode = load_json_file(CONTROL_FILE).get("mode")
     attack_success = load_json_file(ATTACK_SUCCESS_FILE)
     if control_mode == "attack_challenge":

@@ -13,6 +13,9 @@ import random
 # 設定
 # --------------------
 motorPins = (18, 23, 24, 25)
+# UIのa/c指定に応じてGPIO相順を反転し、実際の回転方向を切り替える。
+CLOCKWISE_PHASE_DELTA = -1
+COUNTERCLOCKWISE_PHASE_DELTA = 1
 
 # 28BYJ-48 はULN2003基板との組み合わせでは8相ハーフステップ駆動にする。
 # 減速機の個体差はあるが、出力軸1回転は約4096ハーフステップ。
@@ -43,25 +46,27 @@ HIGH_TORQUE_SEQUENCE = (
 # RPM変更時に一瞬止まるため、全速度で同じ2相励磁を使う。
 USE_HIGH_TORQUE_DRIVE = True
 
-# 40 RPM時は約0.000366秒/ハーフステップ。
-# 10/20/30/40 RPMを下限値へ丸めず、それぞれ異なる速度にする。
-# 高速域で脱調する場合は、この値ではなくRPMテーブルの最高値を下げる。
+# 実機の負荷では40 RPM相当のステップ周期で脱調するため、
+# 40 RPM要求は30 RPM相当の安全な上限へ制限する。
 MIN_STEP_DELAY = 0.0003
 STEPS_PER_BATCH = 16
 
 # 画面・ゲーム内のRPM値を、28BYJ-48が脱調しにくい体感速度へ割り当てる。
 # 値は1ハーフステップ当たりの秒数（小さいほど速い）。
 RPM_STEP_DELAYS = {
-    10: 0.0030,  # かなりゆっくり
+    10: 0.0020,  # かなりゆっくり
     20: 0.0018,  # 程々
     30: 0.0013,  # 少し速い
-    40: 0.0010,  # このモーターで安定しやすい高速域
+    40: 0.0013,  # 30 RPM相当の安全上限
 }
+# 実機ではa方向の機構負荷が大きく、c方向と同じ速度では脱調するため、
+# a方向はステップ間隔を長くしてトルクを優先する。
+COUNTERCLOCKWISE_DELAY_MULTIPLIER = 1.0
+# HIGH_TORQUE_SEQUENCEは各励磁状態を2回保持するため、10 RPM要求では
+# 実効回転が遅すぎてa方向の静止摩擦を越えられない。aの最低始動速度を確保する。
+COUNTERCLOCKWISE_MIN_RPM = 20
 STARTUP_STEP_DELAY = RPM_STEP_DELAYS[10]
 ACCELERATION_RATE = 0.04
-# 方向反転時は十分に減速してから一度コイルを解放し、低速で再始動する。
-REVERSAL_STEP_DELAY = 0.0060
-REVERSAL_PAUSE_SECONDS = 0.20
 
 # 通常時の「現在心拍 - 比較基準」-> RPM の対応表。
 # self_fast（自分の心拍）、next/prev/random_fast（他人の心拍）、
@@ -210,6 +215,25 @@ def approach_step_delay(current, target):
     return min(target, current + max_change)
 
 
+def phase_delta_for_direction(direction):
+    return (
+        CLOCKWISE_PHASE_DELTA
+        if direction == 'c'
+        else COUNTERCLOCKWISE_PHASE_DELTA
+    )
+
+
+def step_delay_for_direction(direction, rpm):
+    if direction == 'a':
+        rpm = max(rpm, COUNTERCLOCKWISE_MIN_RPM)
+    delay = calculate_step_delay(rpm)
+    if delay is None:
+        return None
+    if direction == 'a':
+        return delay * COUNTERCLOCKWISE_DELAY_MULTIPLIER
+    return delay
+
+
 def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH, high_torque=False):
     """励磁相を呼び出し間で保持し、一定周期でハーフステップ駆動する。"""
     global motor_phase, next_step_deadline
@@ -217,7 +241,7 @@ def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH, high_torque=False):
         return
 
     try:
-        phase_delta = 1 if direction == 'c' else -1
+        phase_delta = phase_delta_for_direction(direction)
         sequence = HIGH_TORQUE_SEQUENCE if high_torque else HALF_STEP_SEQUENCE
         with motor_state_lock:
             # 前回の期限が古い場合は、遅れを一気に取り戻そうとせず現在から再開する。
@@ -242,23 +266,6 @@ def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH, high_torque=False):
     except Exception as exc:
         print(f"[WARN] GPIO output failed: {exc}")
 
-
-def pause_motor_for_reversal():
-    """反転前に励磁を解除し、古いステップ期限を破棄する。"""
-    global next_step_deadline
-    if GPIO is None or not gpio_ready:
-        return
-
-    try:
-        with motor_state_lock:
-            for pin in motorPins:
-                GPIO.output(pin, 0)
-            next_step_deadline = None
-        time.sleep(REVERSAL_PAUSE_SECONDS)
-    except RuntimeError as exc:
-        print(f"[WARN] GPIO reversal pause skipped: {exc}")
-    except Exception as exc:
-        print(f"[WARN] GPIO reversal pause failed: {exc}")
 
 # --------------------
 # 心拍差 -> RPM & 方向
@@ -405,13 +412,11 @@ def get_rotation_preferences():
 
 
 def apply_rotation_preferences(calculated_direction, preferences, now=None):
-    """手動方向を優先し、自動時はRPMと無関係にランダム方向を選ぶ。"""
+    """手動方向を優先し、自動時は心拍差から決めた方向を使う。"""
     global applied_direction, applied_direction_changed_at
     current_time = time.monotonic() if now is None else now
     requested = preferences.get("direction", "auto")
-    # autoではデータ取得ループ（約1秒）ごとに方向を抽選する。
-    # 2択なので、同じ方向を引けば維持、逆方向を引けば反転する。
-    candidate = requested if requested in {"c", "a"} else random.choice(("c", "a"))
+    candidate = requested if requested in {"c", "a"} else calculated_direction
     immediate = not bool(preferences.get("hold", True))
 
     with applied_direction_lock:
@@ -865,7 +870,6 @@ def rotation_loop():
     last_logged_items = None
     current_step_delay = None
     current_direction = None
-    pending_direction = None
     while True:
         try:
             with rotation_settings_lock:
@@ -874,7 +878,6 @@ def rotation_loop():
             if not items:
                 current_step_delay = None
                 current_direction = None
-                pending_direction = None
                 # これがずっと出るなら「rotation_settingsが空」
                 # → data_fetch_loop側が毎回clearしてる/ターン不一致/heart_data欠落 など
                 # print("[ROT] no items")
@@ -889,37 +892,16 @@ def rotation_loop():
                 last_logged_items = current_items
 
             for device_id, (rpm, direction, immediate_direction) in items:
-                # RPMをハーフステップ間隔へ変換する。
-                target_step_delay = calculate_step_delay(rpm)
+                # a方向は負荷が大きいため、トルク優先の低速設定にする。
+                target_step_delay = step_delay_for_direction(direction, rpm)
                 # RPMが変わっても励磁シーケンスは切り替えず、
                 # ステップ間隔だけを滑らかに変更する。
                 high_torque = USE_HIGH_TORQUE_DRIVE
                 if current_direction is None:
                     current_direction = direction
                     current_step_delay = max(target_step_delay, STARTUP_STEP_DELAY)
-                elif direction != current_direction:
-                    pending_direction = direction
-                    current_step_delay = approach_step_delay(
-                        current_step_delay,
-                        REVERSAL_STEP_DELAY,
-                    )
-
-                    # まだ減速中なら、指示を変えず現在方向のまま回し続ける。
-                    if current_step_delay < REVERSAL_STEP_DELAY:
-                        rotary(
-                            current_direction,
-                            current_step_delay,
-                            high_torque=high_torque,
-                        )
-                        continue
-
-                    pause_motor_for_reversal()
-                    current_direction = pending_direction
-                    pending_direction = None
-                    current_step_delay = REVERSAL_STEP_DELAY
                 else:
-                    # 減速中に方向指示が戻った場合は反転を取り消す。
-                    pending_direction = None
+                    current_direction = direction
 
                 current_step_delay = approach_step_delay(
                     current_step_delay,

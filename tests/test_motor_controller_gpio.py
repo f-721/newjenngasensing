@@ -70,48 +70,40 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
             motor_controller.motor_phase = original_phase
             motor_controller.next_step_deadline = original_deadline
 
-    def test_reversal_pause_releases_all_coils(self):
-        class FakeGPIO:
-            def __init__(self):
-                self.outputs = []
-
-            def output(self, pin, value):
-                self.outputs.append((pin, value))
-
-        original_gpio = motor_controller.GPIO
-        original_ready = motor_controller.gpio_ready
-        original_deadline = motor_controller.next_step_deadline
-        fake_gpio = FakeGPIO()
-        motor_controller.GPIO = fake_gpio
-        motor_controller.gpio_ready = True
-        motor_controller.next_step_deadline = 123.0
-        try:
-            with patch.object(motor_controller.time, "sleep") as sleep:
-                motor_controller.pause_motor_for_reversal()
-            self.assertEqual(
-                fake_gpio.outputs,
-                [(pin, 0) for pin in motor_controller.motorPins],
-            )
-            self.assertIsNone(motor_controller.next_step_deadline)
-            sleep.assert_called_once_with(
-                motor_controller.REVERSAL_PAUSE_SECONDS
-            )
-        finally:
-            motor_controller.GPIO = original_gpio
-            motor_controller.gpio_ready = original_ready
-            motor_controller.next_step_deadline = original_deadline
+    def test_direction_labels_use_opposite_phase_deltas(self):
+        self.assertEqual(motor_controller.CLOCKWISE_PHASE_DELTA, -1)
+        self.assertEqual(motor_controller.COUNTERCLOCKWISE_PHASE_DELTA, 1)
+        self.assertNotEqual(
+            motor_controller.phase_delta_for_direction("c"),
+            motor_controller.phase_delta_for_direction("a"),
+        )
 
     def test_step_delay_uses_half_step_count(self):
         for rpm, delay in motor_controller.RPM_STEP_DELAYS.items():
             self.assertEqual(motor_controller.calculate_step_delay(rpm), delay)
 
-    def test_supported_rpms_produce_different_speeds(self):
+    def test_40_rpm_uses_the_stable_30_rpm_step_delay(self):
         delays = [
             motor_controller.calculate_step_delay(rpm)
             for rpm in (10, 20, 30, 40)
         ]
         self.assertEqual(delays, sorted(delays, reverse=True))
-        self.assertEqual(len(set(delays)), 4)
+        self.assertEqual(delays[-1], delays[-2])
+
+    def test_a_direction_uses_slower_torque_priority_step_delay(self):
+        c_delay = motor_controller.step_delay_for_direction("c", 20)
+        a_delay = motor_controller.step_delay_for_direction("a", 20)
+
+        self.assertEqual(
+            a_delay,
+            c_delay * motor_controller.COUNTERCLOCKWISE_DELAY_MULTIPLIER,
+        )
+
+    def test_a_direction_uses_minimum_start_speed_at_10_rpm(self):
+        self.assertEqual(
+            motor_controller.step_delay_for_direction("a", 10),
+            motor_controller.step_delay_for_direction("a", 20),
+        )
 
     def test_acceleration_approaches_target_without_jumping(self):
         start = motor_controller.STARTUP_STEP_DELAY
@@ -120,14 +112,13 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
         self.assertLess(next_delay, start)
         self.assertGreater(next_delay, target)
 
-    def test_immediate_direction_setting_changes_without_hold(self):
+    def test_auto_direction_uses_calculated_direction_without_randomizing(self):
         motor_controller.applied_direction = "c"
         motor_controller.applied_direction_changed_at = 100.0
-        with patch.object(motor_controller.random, "choice", return_value="a"):
-            direction, immediate = motor_controller.apply_rotation_preferences(
-                "c", {"direction": "auto", "hold": False}, now=100.1
-            )
-        self.assertEqual(direction, "a")
+        direction, immediate = motor_controller.apply_rotation_preferences(
+            "c", {"direction": "auto", "hold": False}, now=100.1
+        )
+        self.assertEqual(direction, "c")
         self.assertTrue(immediate)
 
     def test_hold_setting_keeps_direction_for_five_seconds(self):
@@ -140,13 +131,12 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
         self.assertEqual(direction, "c")
         self.assertFalse(immediate)
 
-    def test_hold_setting_allows_random_change_after_five_seconds(self):
+    def test_hold_setting_allows_calculated_change_after_five_seconds(self):
         motor_controller.applied_direction = "c"
         motor_controller.applied_direction_changed_at = 100.0
-        with patch.object(motor_controller.random, "choice", return_value="a"):
-            direction, immediate = motor_controller.apply_rotation_preferences(
-                "c", {"direction": "auto", "hold": True}, now=105.0
-            )
+        direction, immediate = motor_controller.apply_rotation_preferences(
+            "a", {"direction": "auto", "hold": True}, now=105.0
+        )
         self.assertEqual(direction, "a")
         self.assertEqual(motor_controller.applied_direction_changed_at, 105.0)
         self.assertFalse(immediate)

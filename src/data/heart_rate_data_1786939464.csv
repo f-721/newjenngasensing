@@ -1,0 +1,15 @@
+timestamp,device_id,heartbeat,baseline,diff,abs_diff,game_phase,current_turn,control_mode,random_extreme,target_watch,is_target,rpm,direction,source_timestamp,collapse,attackers,attack_count,attack_mode,challenge_direction,score,score_change,score_reason,series_id,game_number
+1786939454863,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939454863,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939456092,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939456092,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939457200,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939457200,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939458346,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939458346,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939459506,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939459506,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939460688,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939460688,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1
+1786939461842,watch1,82,82,0,0,playing,watch1,self_fast,,watch1,True,10,c,1786935810101,,,0,,,0,,,20260817_130413,1
+1786939461842,watch2,92,,,,playing,watch1,self_fast,,watch1,False,10,c,1786096721469,,,0,,,0,,,20260817_130413,1

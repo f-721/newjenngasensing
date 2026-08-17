@@ -514,12 +514,15 @@ select {
 
 async function startGame() {
   try {
-    const res = await fetch("/start?mode=jenga", { method: "POST" });
+    const totalSets = document.getElementById("jengaSetCount").value;
+    const res = await fetch(`/start?mode=jenga&sets=${encodeURIComponent(totalSets)}`, { method: "POST" });
     const data = await res.json();
     if (res.ok) {
       alert("ゲームを開始しました");
       isGameRunning = true;   // ← ★★★ これ追加 ★★★
       refreshGameStatus();
+      refreshJengaSeries();
+      refreshScores();
       setupGraphs();
       startPlotting();
     } else {
@@ -572,7 +575,7 @@ async function nextJengaGame() {
     await refreshCurrentTurn();
     await setupGraphs();
     startPlotting();
-    alert(`第${data.game_number}ゲームを開始しました（得点は維持されています）`);
+    alert(`SET ${data.game_number} を開始しました（累計得点は維持されています）`);
   } catch (e) {
     console.error(e);
     alert(gameSwitched
@@ -588,16 +591,31 @@ async function refreshJengaSeries() {
     const res = await fetch("/jenga_series", { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
-    document.getElementById("game-number").innerText = `第${data.game_number || 1}ゲーム`;
+    const modeLabels = {
+      success: "妨害成功型",
+      impact: "影響度型",
+      ranking: "累積順位型",
+      mvp: "MVP型"
+    };
+    document.getElementById("game-number").innerText = `SET ${data.game_number || 1} / ${data.total_sets || 3}　得点方式: ${modeLabels[data.scoring_mode] || "未設定"}`;
     const history = document.getElementById("game-score-history");
-    const scoreHistory = Array.isArray(data.score_history) ? data.score_history : [];
+    const scoreHistory = Array.isArray(data.set_history) ? data.set_history : [];
     history.innerHTML = scoreHistory.map(result => {
       const scores = Object.entries(result.scores || {})
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([watchId, score]) => `${watchId}: ${score}点`)
+        .map(([watchId, score]) => `${watchId}: ${score.total_score || 0}点`)
         .join(" / ");
-      return `<div class="game-score-history-item">第${result.game_number}ゲーム終了　${scores}</div>`;
+      const mvp = result.mvp ? ` / 妨害MVP: ${result.mvp}` : "";
+      return `<div class="game-score-history-item">SET ${result.set} 終了 / 倒壊: ${result.collapsed_player}${mvp}<br>${scores}</div>`;
     }).join("");
+    const interferenceRanking = Array.isArray(data.interference_ranking) ? data.interference_ranking : [];
+    if (interferenceRanking.length) {
+      history.innerHTML += `<div class="game-score-history-item">現在の妨害順位: ${interferenceRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.success_count}回)`).join(" / ")}</div>`;
+    }
+    const finalRanking = Array.isArray(data.final_ranking) ? data.final_ranking : [];
+    if (finalRanking.length) {
+      history.innerHTML += `<div class="game-score-history-item">最終総合順位: ${finalRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.total_score}点)`).join(" / ")}</div>`;
+    }
   } catch (e) {
     console.error("連続ゲーム情報の取得に失敗", e);
   }
@@ -743,7 +761,12 @@ async function refreshScores() {
     const board = document.getElementById('score-board');
     board.innerHTML = Object.entries(scores)
       .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-      .map(([watchId, score]) => `<div class="score-item">${watchId}: ${score}点</div>`)
+      .map(([watchId, score]) => {
+        if (typeof score === "object" && score !== null) {
+          return `<div class="score-item">${watchId}: ${score.total_score || 0}点<br><small>生存 ${score.survival_score || 0} / 妨害 ${score.interference_score || 0} / 順位 ${score.ranking_bonus || 0}</small></div>`;
+        }
+        return `<div class="score-item">${watchId}: ${score}点</div>`;
+      })
       .join('');
   } catch (error) {
     console.error(error);
@@ -916,10 +939,14 @@ async function recordCollapse() {
     const data = await res.json();
     
     if (res.ok) {
-      statusEl.innerText = "✓ 倒壊を記録しました";
+      statusEl.innerText = data.series_complete ? "✓ 最終セットを確定しました" : "✓ セット得点を確定しました。次セットへ進めます";
       statusEl.style.color = "#4caf50";
       document.getElementById("collapseNotes").value = "";
       await refreshScores();
+      await refreshJengaSeries();
+      await refreshGameStatus();
+      isGameRunning = false;
+      stopPlotting();
       
       setTimeout(() => {
         statusEl.innerText = "";
@@ -1518,9 +1545,9 @@ async function loadCurrentMode() {
 function getAttackScoringLabel(mode) {
   const labels = {
     success: "成功回数: 成功 +1点",
-    impact: "影響度: 成功 +2点、首位 +3点",
-    ranking: "順位制: 1位 5点 / 2位 3点 / 3位 1点",
-    mvp: "MVP: 最大影響度 +5点"
+    impact: "影響度: セット首位 +1点",
+    ranking: "累積順位: 最終1位 +2点 / 2位 +1点",
+    mvp: "MVP: セットMVP +1点"
   };
   return labels[mode] || mode;
 }
@@ -1605,6 +1632,13 @@ async function resetGameOnly() {
         <div class="control-section">
           <h3>ゲーム</h3>
           <button onclick="startGame()">開始</button>
+          <label for="jengaSetCount">セット数</label>
+          <select id="jengaSetCount">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+          </select>
           <button class="stop-button" onclick="stopGame()">終了</button>
           <button id="nextGameBtn" onclick="nextJengaGame()" style="background-color:#ff9800;">得点を維持して次のゲームへ</button>
           <button class="reset-button" onclick="resetServer()">リセット</button>
@@ -1672,9 +1706,9 @@ async function resetGameOnly() {
             <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
             <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
               <option value="success">成功回数: 成功 +1点</option>
-              <option value="impact">影響度: 成功 +2点、首位 +3点</option>
-              <option value="ranking">順位制: 1位 5点 / 2位 3点 / 3位 1点</option>
-              <option value="mvp">MVP: 最大影響度 +5点</option>
+              <option value="impact">影響度: セット首位 +1点</option>
+              <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
+              <option value="mvp">MVP: セットMVP +1点</option>
             </select>
           </div>
 

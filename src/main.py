@@ -12,7 +12,12 @@ from score_logic import (
     ATTACK_SCORING_MODES,
     apply_points,
     attack_challenge_score_awards,
+    apply_ranking_bonus,
+    calculate_final_ranking,
+    calculate_interference_ranking,
+    calculate_set_score,
     normalize_scores,
+    normalize_series_scores,
     turn_scoring_targets,
 )
 
@@ -144,12 +149,130 @@ def load_jenga_series():
         game_number = max(1, int(state.get("game_number", 1)))
     except (TypeError, ValueError):
         game_number = 1
+    try:
+        total_sets = max(1, int(state.get("total_sets", 3)))
+    except (TypeError, ValueError):
+        total_sets = 3
+    watches = state.get("watch_ids", []) if isinstance(state.get("watch_ids"), list) else []
     return {
         "series_id": state.get("series_id"),
         "game_number": game_number,
+        "total_sets": total_sets,
         "active": bool(state.get("active", False)),
-        "score_history": state.get("score_history", []) if isinstance(state.get("score_history", []), list) else [],
+        "set_finished": bool(state.get("set_finished", False)),
+        "scoring_mode": state.get("scoring_mode") if state.get("scoring_mode") in ATTACK_SCORING_MODES else "success",
+        "watch_ids": sorted({watch_id for watch_id in watches if isinstance(watch_id, str) and watch_id}),
+        "scores": state.get("scores", {}) if isinstance(state.get("scores"), dict) else {},
+        "set_history": state.get("set_history", []) if isinstance(state.get("set_history"), list) else [],
+        "current_set_events": state.get("current_set_events", []) if isinstance(state.get("current_set_events"), list) else [],
+        "attack_events": state.get("attack_events", []) if isinstance(state.get("attack_events"), list) else [],
+        "final_ranking": state.get("final_ranking", []) if isinstance(state.get("final_ranking"), list) else [],
+        "score_history": state.get("set_history", []) if isinstance(state.get("set_history"), list) else [],
+        "last_set_result": state.get("last_set_result") if isinstance(state.get("last_set_result"), dict) else {},
     }
+
+
+def save_jenga_series(series):
+    watches = series.get("watch_ids", [])
+    series["scores"] = normalize_series_scores(series.get("scores"), watches)
+    save_json_file(JENGA_SERIES_FILE, series, log=False)
+
+
+def initialize_jenga_series(watch_ids, total_sets, scoring_mode):
+    watches = sorted({watch_id for watch_id in watch_ids if isinstance(watch_id, str) and watch_id}, key=get_watch_sort_key)
+    series = {
+        "series_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "game_number": 1,
+        "total_sets": total_sets,
+        "active": True,
+        "set_finished": False,
+        "scoring_mode": scoring_mode,
+        "watch_ids": watches,
+        "scores": normalize_series_scores({}, watches),
+        "set_history": [],
+        "current_set_events": [],
+        "attack_events": [],
+        "final_ranking": [],
+        "last_set_result": {},
+    }
+    save_jenga_series(series)
+    save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in watches}, log=False)
+    return series
+
+
+def record_attack_success_event(attacker, success):
+    series = load_jenga_series()
+    if not series["active"] or series["set_finished"] or attacker not in series["watch_ids"]:
+        return
+    event = {
+        "attacker": attacker,
+        "timestamp": int(time.time() * 1000),
+        "impact": success.get("impact", 0),
+        "threshold": success.get("threshold"),
+        "heartbeat": success.get("heartbeat"),
+        "direction": success.get("direction"),
+    }
+    series["current_set_events"].append(event)
+    series["attack_events"].append(event)
+    save_jenga_series(series)
+
+
+def finish_set(collapsed_player):
+    """Finalize exactly one set, keeping cumulative scores for the next set."""
+    series = load_jenga_series()
+    if not series["active"] or series["set_finished"]:
+        return None
+
+    scores, set_points, mvp = calculate_set_score(
+        series["scores"],
+        series["watch_ids"],
+        collapsed_player,
+        series["current_set_events"],
+        series["scoring_mode"],
+    )
+    survivors = [watch_id for watch_id in series["watch_ids"] if watch_id != collapsed_player]
+    success_counts = {
+        watch_id: sum(1 for event in series["current_set_events"] if event.get("attacker") == watch_id)
+        for watch_id in series["watch_ids"]
+    }
+    result = {
+        "set": series["game_number"],
+        "collapsed_player": collapsed_player,
+        "survivors": survivors,
+        "interference_success": success_counts,
+        "mvp": mvp,
+        "set_points": set_points,
+        "scores": scores,
+    }
+    series["scores"] = scores
+    series["set_history"].append(result)
+    series["last_set_result"] = result
+    series["set_finished"] = True
+
+    if series["game_number"] >= series["total_sets"]:
+        if series["scoring_mode"] == "ranking":
+            series["scores"], _ = apply_ranking_bonus(
+                series["scores"], series["attack_events"], series["watch_ids"]
+            )
+        series["final_ranking"] = calculate_final_ranking(series["scores"], series["watch_ids"])
+        series["active"] = False
+
+    save_jenga_series(series)
+    save_json_file(SCORES_FILE, {
+        watch_id: entry["total_score"] for watch_id, entry in series["scores"].items()
+    }, log=False)
+    return series
+
+
+def start_next_set():
+    series = load_jenga_series()
+    if not series["active"] or not series["set_finished"] or series["game_number"] >= series["total_sets"]:
+        return None
+    series["game_number"] += 1
+    series["set_finished"] = False
+    series["current_set_events"] = []
+    save_jenga_series(series)
+    return series
 
 
 def jenga_csv_fields():
@@ -160,6 +283,8 @@ def jenga_csv_fields():
 
 
 def award_turn_scores(current_turn):
+    if load_jenga_series()["active"]:
+        return []
     control_mode = load_json_file(CONTROL_FILE).get("mode")
     attack_success = load_attack_success()
     if control_mode == "attack_challenge":
@@ -547,6 +672,7 @@ def resolve_attack_challenge():
                 "threshold": threshold,
                 "impact": impact,
             }
+            record_attack_success_event(attacker, success_state[attacker])
             resolved.append(attacker)
 
     if resolved:
@@ -647,18 +773,17 @@ def start_game():
         "current_turn": ids[0] if ids else None,
         "turn_number": 1 if ids else 0,
     })
-    save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in ids}, log=False)
-
     if request.args.get("mode") == "jenga":
-        save_json_file(JENGA_SERIES_FILE, {
-            "series_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "game_number": 1,
-            "active": True,
-            "score_history": [],
-        }, log=False)
+        try:
+            total_sets = max(1, int(request.args.get("sets", 3)))
+        except (TypeError, ValueError):
+            total_sets = 3
+        initialize_jenga_series(ids, total_sets, load_attack_scoring()["mode"])
         if os.path.exists(LIVE_CSV_FILE):
             with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
                 pass
+    else:
+        save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in ids}, log=False)
 
     print("[GAME START] baseline完全一致 → 開始")
     return jsonify({"status": "ok", "message": "ゲームを開始しました"})
@@ -666,12 +791,16 @@ def start_game():
 
 @app.route('/jenga_series', methods=['GET'])
 def get_jenga_series():
-    return jsonify({**load_jenga_series(), "scores": load_scores()})
+    series = load_jenga_series()
+    return jsonify({
+        **series,
+        "interference_ranking": calculate_interference_ranking(series["attack_events"], series["watch_ids"]),
+    })
 
 
 @app.route('/next_jenga_game', methods=['POST'])
 def next_jenga_game():
-    """累計点とCSV履歴を残し、ゲーム内状態だけを初期化して次戦を始める。"""
+    """確定済みセットの累計点を保持して次セットを開始する。"""
     status = load_json_file(GAME_STATUS_FILE)
     if status.get("running", False):
         return jsonify({
@@ -688,26 +817,9 @@ def next_jenga_game():
     if missing:
         return jsonify({"status": "error", "message": "平均値が未取得です: " + ", ".join(missing)}), 400
 
-    series = load_jenga_series()
-    if not series["active"] or not series["series_id"]:
-        # 機能追加前に開始・終了したゲームからでも、そのまま第2ゲームへ移れるようにする。
-        series = {
-            "series_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "game_number": 1,
-            "active": True,
-            "score_history": [],
-        }
-    ended_game_number = series["game_number"]
-    scores = load_scores()
-    score_snapshot = {
-        "game_number": ended_game_number,
-        "scores": scores,
-        "recorded_at": int(time.time() * 1000),
-    }
-    series["score_history"].append(score_snapshot)
-    series["game_number"] += 1
-    series["active"] = True
-    save_json_file(JENGA_SERIES_FILE, series, log=False)
+    series = start_next_set()
+    if not series:
+        return jsonify({"status": "error", "message": "倒壊によるセット終了後、最終セット前のみ次セットを開始できます"}), 409
 
     reset_attack_cycle_state()
     save_json_file(ROTATION_STATUS_FILE, {}, log=False)
@@ -716,17 +828,6 @@ def next_jenga_game():
     save_json_file(GAME_STATUS_FILE, status, log=False)
 
     history = load_csv_history()
-    for watch_id in assigned_ids:
-        history.append({
-            "timestamp": score_snapshot["recorded_at"],
-            "device_id": watch_id,
-            "game_phase": "game_end",
-            "score": scores.get(watch_id, 0),
-            "score_change": "",
-            "score_reason": f"ジェンガ第{ended_game_number}ゲーム終了時点",
-            "series_id": series["series_id"],
-            "game_number": ended_game_number,
-        })
     history.append({
         "timestamp": int(time.time() * 1000),
         "game_phase": "game_start",
@@ -738,8 +839,8 @@ def next_jenga_game():
     return jsonify({
         "status": "ok",
         "game_number": series["game_number"],
-        "scores": scores,
-        "score_history": series["score_history"],
+        "scores": series["scores"],
+        "score_history": series["set_history"],
     })
 
 
@@ -869,6 +970,9 @@ def set_turn():
 
 @app.route('/scores', methods=['GET'])
 def get_scores():
+    series = load_jenga_series()
+    if series["series_id"]:
+        return jsonify(normalize_series_scores(series["scores"], series["watch_ids"]))
     scores = load_scores()
     for watch_id in set(load_json_file(ASSIGNED_FILE).values()):
         scores.setdefault(watch_id, 0)
@@ -886,6 +990,36 @@ def record_collapse():
         return jsonify({"status": "error", "message": "現在の手番が設定されていません"}), 400
 
     data = request.get_json(silent=True) or {}
+    series = load_jenga_series()
+    if series["active"]:
+        series = finish_set(current_turn)
+        game_status["running"] = False
+        game_status["game_over"] = not series["active"]
+        save_json_file(GAME_STATUS_FILE, game_status, log=False)
+        result = series["last_set_result"]
+        history = load_csv_history()
+        history.append({
+            "timestamp": int(time.time() * 1000),
+            "device_id": current_turn,
+            "game_phase": "set_end",
+            "current_turn": current_turn,
+            "collapse": data.get("notes") or data.get("message") or "倒壊",
+            "score": series["scores"][current_turn]["total_score"],
+            "score_change": 0,
+            "score_reason": f"SET {result['set']} 終了",
+            **jenga_csv_fields(),
+        })
+        save_json_file(CSV_HISTORY_FILE, history, log=False)
+        return jsonify({
+            "status": "ok",
+            "watch_id": current_turn,
+            "set_finished": True,
+            "series_complete": not series["active"],
+            "scores": series["scores"],
+            "set_result": result,
+            "final_ranking": series["final_ranking"],
+        })
+
     scores = apply_points(load_scores(), [current_turn], -3)
     save_json_file(SCORES_FILE, scores, log=False)
 
@@ -971,6 +1105,8 @@ def get_attack_scoring():
 def set_attack_scoring():
     if load_json_file(GAME_STATUS_FILE).get("running", False):
         return jsonify({"status": "error", "message": "ゲーム中は妨害チャレンジの得点方式を変更できません"}), 409
+    if load_jenga_series()["active"]:
+        return jsonify({"status": "error", "message": "連続ゲーム中は妨害チャレンジの得点方式を変更できません"}), 409
     if load_json_file(CONTROL_FILE).get("mode") != "attack_challenge":
         return jsonify({"status": "error", "message": "妨害チャレンジ選択中のみ得点方式を変更できます"}), 409
 
