@@ -37,3 +37,19 @@ def test_control_mode_can_be_changed_before_game(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert main.load_json_file(str(control_file)) == {"mode": "random_diff"}
+
+
+def test_manual_test_mode_can_be_selected_before_game(monkeypatch, tmp_path):
+    game_file = tmp_path / "game_status.json"
+    control_file = tmp_path / "control_mode.json"
+    assigned_file = tmp_path / "assigned_ids.json"
+    monkeypatch.setattr(main, "GAME_STATUS_FILE", str(game_file))
+    monkeypatch.setattr(main, "CONTROL_FILE", str(control_file))
+    monkeypatch.setattr(main, "ASSIGNED_FILE", str(assigned_file))
+    main.save_json_file(str(game_file), {"running": False}, log=False)
+    main.save_json_file(str(assigned_file), {"ip1": "watch1", "ip2": "watch2"}, log=False)
+
+    response = main.app.test_client().post("/set_control_mode", json={"mode": "manual_test"})
+
+    assert response.status_code == 200
+    assert main.load_json_file(str(control_file)) == {"mode": "manual_test"}

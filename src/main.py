@@ -46,6 +46,7 @@ BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 CONTROL_FILE = "control_mode.json"
 ROTATION_SETTINGS_FILE = os.path.join(BASE_DIR, "rotation_settings.json")
 ROTATION_STATUS_FILE = os.path.join(BASE_DIR, "rotation_status.json")
+MANUAL_ROTATION_FILE = os.path.join(BASE_DIR, "manual_rotation.json")
 SCORES_FILE = os.path.join(BASE_DIR, "scores.json")
 ATTACK_TARGETS_FILE = os.path.join(BASE_DIR, "attack_targets.json")
 ATTACK_ROUND_FILE = os.path.join(BASE_DIR, "attack_round.json")
@@ -129,6 +130,26 @@ def save_rotation_settings(settings):
 
 def save_rotation_status(status):
     save_json_file(ROTATION_STATUS_FILE, status, log=False)
+
+
+def load_manual_rotation():
+    settings = load_json_file(MANUAL_ROTATION_FILE)
+    if not isinstance(settings, dict):
+        settings = {}
+    enabled = bool(settings.get("enabled", False))
+    mode = settings.get("mode") or settings.get("direction") or "c"
+    if mode not in {"c", "a", "random"}:
+        mode = "c"
+    try:
+        rpm = int(float(settings.get("rpm", 10)))
+    except (TypeError, ValueError):
+        rpm = 10
+    rpm = max(0, min(rpm, 60))
+    return {"enabled": enabled, "rpm": rpm, "mode": mode, "direction": mode if mode in {"c", "a"} else "c"}
+
+
+def save_manual_rotation(settings):
+    save_json_file(MANUAL_ROTATION_FILE, settings, log=False)
 
 
 def load_scores():
@@ -1247,6 +1268,37 @@ def set_rotation_hold():
     return jsonify({"status": "ok", "hold": hold})
 
 
+@app.route('/manual_rotation', methods=['GET'])
+def get_manual_rotation():
+    return jsonify(load_manual_rotation())
+
+
+@app.route('/set_manual_rotation', methods=['POST'])
+def set_manual_rotation():
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode") or data.get("direction") or "c"
+    if mode not in {"c", "a", "random"}:
+        return jsonify({"status": "error", "message": "modeはc、a、randomのいずれかで指定してください"}), 400
+
+    try:
+        rpm = int(float(data.get("rpm", 10)))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "rpmは数値で指定してください"}), 400
+
+    rpm = max(0, min(rpm, 60))
+    enabled = bool(data.get("enabled", True))
+
+    settings = {"enabled": enabled, "rpm": rpm, "mode": mode, "direction": mode if mode in {"c", "a"} else "c"}
+    save_manual_rotation(settings)
+    return jsonify({"status": "ok", "manual_rotation": settings})
+
+
+@app.route('/clear_manual_rotation', methods=['POST'])
+def clear_manual_rotation():
+    save_manual_rotation({"enabled": False, "rpm": 10, "mode": "c", "direction": "c"})
+    return jsonify({"status": "ok", "manual_rotation": {"enabled": False, "rpm": 10, "mode": "c", "direction": "c"}})
+
+
 @app.route("/set_control_mode", methods=["POST"])
 def set_control_mode():
     if load_json_file(GAME_STATUS_FILE).get("running", False):
@@ -1268,6 +1320,7 @@ def set_control_mode():
         "lowest_diff",
         "random_diff",
         "attack_challenge",
+        "manual_test",
     }
 
     if mode not in allowed_modes:

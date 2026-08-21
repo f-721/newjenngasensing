@@ -50,6 +50,20 @@ def test_rotation_settings_can_be_saved_and_loaded(monkeypatch, tmp_path):
     assert client.get("/get_rotation_settings").get_json() == {"direction": "a", "hold": False}
 
 
+def test_manual_rotation_override_can_be_set_and_cleared(monkeypatch, tmp_path):
+    manual_path = tmp_path / "manual_rotation.json"
+    monkeypatch.setattr(main, "MANUAL_ROTATION_FILE", str(manual_path))
+
+    client = main.app.test_client()
+    response = client.post("/set_manual_rotation", json={"rpm": 10, "direction": "a", "enabled": True})
+    assert response.status_code == 200
+    assert client.get("/manual_rotation").get_json() == {"enabled": True, "rpm": 10, "direction": "a"}
+
+    clear_response = client.post("/clear_manual_rotation")
+    assert clear_response.status_code == 200
+    assert client.get("/manual_rotation").get_json() == {"enabled": False, "rpm": 10, "direction": "c"}
+
+
 def test_attack_target_api_validates_and_persists(monkeypatch, tmp_path):
     targets_path = tmp_path / "attack_targets.json"
     monkeypatch.setattr(main, "ATTACK_TARGETS_FILE", str(targets_path))

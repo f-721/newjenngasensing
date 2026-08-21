@@ -237,6 +237,30 @@ select {
   min-width: 220px;
 }
 
+.challenge-detail {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff7e6;
+  border: 1px solid #f6d58b;
+  color: #4a2e00;
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+
+.challenge-detail strong {
+  color: #6b3d00;
+}
+
+.challenge-detail ul {
+  margin: 6px 0 0 1.2em;
+  padding: 0;
+}
+
+.challenge-detail li {
+  margin: 2px 0;
+}
+
 .heart-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -309,20 +333,51 @@ select {
 }
 
 .game-score-history {
-  margin-top: 8px;
+  margin-top: 10px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .game-score-history-item {
-  background: #fff8e1;
-  border: 1px solid #ffcc80;
-  border-radius: 9px;
-  padding: 6px 10px;
+  border-radius: 10px;
+  padding: 8px 10px;
   font-size: 0.86em;
   font-weight: bold;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.game-score-history-item.set-row {
+  background: #fff8e1;
+  border-color: #ffcc80;
+}
+
+.game-score-history-item.rank-row {
+  background: #eef7ff;
+  border-color: #90caf9;
+}
+
+.game-score-history-item .info-label {
+  display: inline-block;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 4px;
+  font-weight: 900;
+}
+
+.game-score-history-item.set-row .info-label {
+  background: #ffe082;
+  color: #6d4c00;
+}
+
+.game-score-history-item.rank-row .info-label {
+  background: #bbdefb;
+  color: #0d47a1;
 }
 
 .chart-wrapper {
@@ -606,15 +661,30 @@ async function refreshJengaSeries() {
         .map(([watchId, score]) => `${watchId}: ${score.total_score || 0}点`)
         .join(" / ");
       const mvp = result.mvp ? ` / 妨害MVP: ${result.mvp}` : "";
-      return `<div class="game-score-history-item">SET ${result.set} 終了 / 倒壊: ${result.collapsed_player}${mvp}<br>${scores}</div>`;
+      return `
+        <div class="game-score-history-item set-row">
+          <div class="info-label">SET</div>
+          SET ${result.set} 終了 / 倒壊: ${result.collapsed_player}${mvp}<br>${scores}
+        </div>
+      `;
     }).join("");
     const interferenceRanking = Array.isArray(data.interference_ranking) ? data.interference_ranking : [];
     if (interferenceRanking.length) {
-      history.innerHTML += `<div class="game-score-history-item">現在の妨害順位: ${interferenceRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.success_count}回)`).join(" / ")}</div>`;
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">順位</div>
+          現在の妨害順位: ${interferenceRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.success_count}回)`).join(" / ")}
+        </div>
+      `;
     }
     const finalRanking = Array.isArray(data.final_ranking) ? data.final_ranking : [];
     if (finalRanking.length) {
-      history.innerHTML += `<div class="game-score-history-item">最終総合順位: ${finalRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.total_score}点)`).join(" / ")}</div>`;
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">総合</div>
+          最終総合順位: ${finalRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.total_score}点)`).join(" / ")}
+        </div>
+      `;
     }
   } catch (e) {
     console.error("連続ゲーム情報の取得に失敗", e);
@@ -1007,6 +1077,7 @@ window.addEventListener("load", async () => {
   await refreshClientList();
   await setupGraphs();
   await loadBaselineToUI();
+  await loadManualRotationStatus();
 
   // 🔁 状態を取得して、ゲーム中ならグラフ描画も再開
   try {
@@ -1368,7 +1439,8 @@ function getModeLabel(mode) {
     highest_diff: "基準値より最も上がった人",
     lowest_diff: "基準値より最も下がった人",
     random_diff: "上昇・下降をターンごとランダム",
-    attack_challenge: "妨害チャレンジ"
+    attack_challenge: "妨害チャレンジ",
+    manual_test: "手動テストモード"
   };
   return modeNames[mode] || mode;
 }
@@ -1542,6 +1614,60 @@ async function loadCurrentMode() {
   }
 }
 
+async function setManualRotation(rpm, mode) {
+  try {
+    const res = await fetch("/set_manual_rotation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpm, mode, enabled: true })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showBanner(data.message || "手動回転の設定に失敗しました");
+      return;
+    }
+    const modeLabel = mode === "c" ? "時計回り" : mode === "a" ? "反時計回り" : "ランダム";
+    const statusEl = document.getElementById("manual-rotation-status");
+    statusEl.innerText = `手動テスト: ${rpm} RPM / ${modeLabel}`;
+    showBanner(`手動テスト回転: ${rpm} RPM / ${modeLabel}`);
+  } catch (e) {
+    console.error(e);
+    showBanner("手動回転の設定通信エラー");
+  }
+}
+
+async function clearManualRotation() {
+  try {
+    const res = await fetch("/clear_manual_rotation", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      showBanner(data.message || "手動回転の停止に失敗しました");
+      return;
+    }
+    document.getElementById("manual-rotation-status").innerText = "手動テスト: 停止中";
+    showBanner("手動回転テストを停止しました");
+  } catch (e) {
+    console.error(e);
+    showBanner("手動回転解除の通信エラー");
+  }
+}
+
+async function loadManualRotationStatus() {
+  try {
+    const res = await fetch("/manual_rotation");
+    const data = await res.json();
+    if (!data.enabled) {
+      document.getElementById("manual-rotation-status").innerText = "手動テスト: 停止中";
+      return;
+    }
+    const mode = data.mode || data.direction || "c";
+    const modeLabel = mode === "c" ? "時計回り" : mode === "a" ? "反時計回り" : "ランダム";
+    document.getElementById("manual-rotation-status").innerText = `手動テスト: ${data.rpm} RPM / ${modeLabel}`;
+  } catch (e) {
+    console.error("手動テスト状態取得失敗", e);
+  }
+}
+
 function getAttackScoringLabel(mode) {
   const labels = {
     success: "成功回数: 成功 +1点",
@@ -1710,6 +1836,21 @@ async function resetGameOnly() {
               <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
               <option value="mvp">MVP: セットMVP +1点</option>
             </select>
+            <div class="challenge-detail">
+              <strong>妨害チャレンジ詳細</strong>
+              <ul>
+                <li><strong>成功回数</strong>: 妨害に成功した回数ごとに +1 点</li>
+                <li><strong>影響度</strong>: そのセットで最も影響が大きかった人に +1 点</li>
+                <li><strong>累積順位</strong>: 最終順位で 1 位 +2 点、2 位 +1 点</li>
+                <li><strong>MVP</strong>: セット内で最も妨害に貢献した人に +1 点</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mode-group compact-rotation">
+            <div class="mode-group-title">手動テスト専用</div>
+            <button class="mode-btn dir-btn small" onclick="setMode('manual_test')" style="background-color:#ff9800;">手動テストモード</button>
+            <div class="mode-note">ゲーム未開始時に、設計者用回転ボタンでモーターを確認できます</div>
           </div>
 
           <div class="mode-group compact-rotation">
@@ -1730,6 +1871,33 @@ async function resetGameOnly() {
               </div>
             </details>
           </div>
+
+          <details class="mode-group other-group" style="display:block;">
+            <summary style="cursor:pointer; font-weight:bold;">設計者用テスト回転</summary>
+            <div class="compact-controls" style="margin-top: 10px;">
+              <div class="mode-group-title">方向</div>
+              <div class="compact-btns">
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'c')">時計 10</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'c')">時計 20</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'c')">時計 30</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'c')">時計 40</button>
+              </div>
+              <div class="compact-btns">
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'a')">反時計 10</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'a')">反時計 20</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'a')">反時計 30</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'a')">反時計 40</button>
+              </div>
+              <div class="compact-btns">
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'random')">ランダム 10</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'random')">ランダム 20</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'random')">ランダム 30</button>
+                <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'random')">ランダム 40</button>
+              </div>
+              <button class="mode-btn dir-btn small" style="background-color:#f44336;" onclick="clearManualRotation()">停止</button>
+            </div>
+            <div id="manual-rotation-status" class="mode-note">手動テスト: 停止中</div>
+          </details>
         </div>
 
         <div id="mode-current" class="mode-current">現在の設定：未設定</div>

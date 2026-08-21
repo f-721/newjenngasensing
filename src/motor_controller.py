@@ -60,11 +60,11 @@ RPM_STEP_DELAYS = {
     40: 0.0013,  # 30 RPM相当の安全上限
 }
 # 実機ではa方向の機構負荷が大きく、c方向と同じ速度では脱調するため、
-# a方向はステップ間隔を長くしてトルクを優先する。
+# a方向は少しステップ間隔を長くしてトルクと体感速度を揃える。
 COUNTERCLOCKWISE_DELAY_MULTIPLIER = 1.0
-# HIGH_TORQUE_SEQUENCEは各励磁状態を2回保持するため、10 RPM要求では
-# 実効回転が遅すぎてa方向の静止摩擦を越えられない。aの最低始動速度を確保する。
-COUNTERCLOCKWISE_MIN_RPM = 20
+# 反時計回りは同じRPMでも体感速度が変わりやすく、特に30/40では差が出やすい。
+# ここで補正を入れて、時計回りと同じ感覚になるようにする。
+COUNTERCLOCKWISE_MIN_RPM = 30
 STARTUP_STEP_DELAY = RPM_STEP_DELAYS[10]
 ACCELERATION_RATE = 0.04
 
@@ -223,14 +223,27 @@ def phase_delta_for_direction(direction):
     )
 
 
+def counterclockwise_delay_multiplier_for_rpm(rpm):
+    rpm_value = float(rpm)
+    if rpm_value >= 40:
+        return 1.25
+    if rpm_value >= 30:
+        return 1.20
+    return 1.35
+
+
 def step_delay_for_direction(direction, rpm):
+    effective_rpm = rpm
     if direction == 'a':
-        rpm = max(rpm, COUNTERCLOCKWISE_MIN_RPM)
-    delay = calculate_step_delay(rpm)
+        # 実機の起動特性上、反時計回りは 30 RPM 未満を出力しない。
+        if float(rpm) < float(COUNTERCLOCKWISE_MIN_RPM):
+            return None
+        effective_rpm = float(COUNTERCLOCKWISE_MIN_RPM)
+    delay = calculate_step_delay(effective_rpm)
     if delay is None:
         return None
     if direction == 'a':
-        return delay * COUNTERCLOCKWISE_DELAY_MULTIPLIER
+        return delay * counterclockwise_delay_multiplier_for_rpm(effective_rpm)
     return delay
 
 
@@ -393,6 +406,26 @@ def get_control_mode():
         return res.json().get("mode","self")
     except:
         return "self"
+
+
+def get_manual_rotation():
+    try:
+        res = requests.get(f"{API_HOST}/manual_rotation", timeout=2)
+        res.raise_for_status()
+        data = res.json()
+        if not isinstance(data, dict):
+            return {"enabled": False, "rpm": 10, "mode": "c"}
+        mode = data.get("mode") or data.get("direction") or "c"
+        if mode not in {"c", "a", "random"}:
+            mode = "c"
+        try:
+            rpm = int(float(data.get("rpm", 10)))
+        except (TypeError, ValueError):
+            rpm = 10
+        rpm = max(0, min(rpm, 60))
+        return {"enabled": bool(data.get("enabled", False)), "rpm": rpm, "mode": mode}
+    except Exception:
+        return {"enabled": False, "rpm": 10, "mode": "c"}
 
 
 def get_rotation_preferences():
@@ -652,6 +685,18 @@ def data_fetch_loop():
 
     while True:
         try:
+            manual_rotation = get_manual_rotation()
+            if manual_rotation.get("enabled"):
+                with rotation_settings_lock:
+                    rotation_settings.clear()
+                    rotation_settings["manual_test"] = (
+                        manual_rotation["rpm"],
+                        manual_rotation["mode"],
+                        False,
+                    )
+                time.sleep(0.25)
+                continue
+
             running = get_game_status()
             if running is None:
                 # APIの一時的な通信失敗中は最後の回転設定を維持する。
@@ -878,30 +923,33 @@ def rotation_loop():
             if not items:
                 current_step_delay = None
                 current_direction = None
-                # これがずっと出るなら「rotation_settingsが空」
-                # → data_fetch_loop側が毎回clearしてる/ターン不一致/heart_data欠落 など
-                # print("[ROT] no items")
                 time.sleep(0.05)
                 continue
 
-            # 同じ設定をバッチごとに出力するとログI/Oでステップ周期が乱れるため、
-            # RPM・方向・対象が変わった時だけ表示する。
             current_items = tuple(items)
             if current_items != last_logged_items:
                 print(f"[ROT] active={len(items)} settings={current_items}")
                 last_logged_items = current_items
 
-            for device_id, (rpm, direction, immediate_direction) in items:
-                # a方向は負荷が大きいため、トルク優先の低速設定にする。
-                target_step_delay = step_delay_for_direction(direction, rpm)
-                # RPMが変わっても励磁シーケンスは切り替えず、
-                # ステップ間隔だけを滑らかに変更する。
+            for device_id, (rpm, mode_or_direction, immediate_direction) in items:
+                effective_direction = mode_or_direction
+                if mode_or_direction == "random":
+                    effective_direction = random.choice(["c", "a"])
+
+                if effective_direction == "a" and float(rpm) < float(COUNTERCLOCKWISE_MIN_RPM):
+                    print(f"[ROT] 反時計回りは {COUNTERCLOCKWISE_MIN_RPM} RPM 未満で出力しないため無視: rpm={rpm}")
+                    continue
+
+                target_step_delay = step_delay_for_direction(effective_direction, rpm)
+                if target_step_delay is None:
+                    continue
+
                 high_torque = USE_HIGH_TORQUE_DRIVE
                 if current_direction is None:
-                    current_direction = direction
+                    current_direction = effective_direction
                     current_step_delay = max(target_step_delay, STARTUP_STEP_DELAY)
                 else:
-                    current_direction = direction
+                    current_direction = effective_direction
 
                 current_step_delay = approach_step_delay(
                     current_step_delay,
