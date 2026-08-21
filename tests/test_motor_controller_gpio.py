@@ -91,19 +91,21 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
         self.assertEqual(delays[-1], delays[-2])
 
     def test_a_direction_uses_slower_torque_priority_step_delay(self):
-        c_delay = motor_controller.step_delay_for_direction("c", 20)
-        a_delay = motor_controller.step_delay_for_direction("a", 20)
+        self.assertIsNone(motor_controller.step_delay_for_direction("a", 20))
 
-        self.assertEqual(
+        c_delay = motor_controller.step_delay_for_direction("c", 30)
+        a_delay = motor_controller.step_delay_for_direction("a", 30)
+
+        self.assertGreater(a_delay, c_delay)
+        self.assertGreaterEqual(
             a_delay,
             c_delay * motor_controller.COUNTERCLOCKWISE_DELAY_MULTIPLIER,
         )
 
     def test_a_direction_uses_minimum_start_speed_at_10_rpm(self):
-        self.assertEqual(
-            motor_controller.step_delay_for_direction("a", 10),
-            motor_controller.step_delay_for_direction("a", 20),
-        )
+        self.assertIsNone(motor_controller.step_delay_for_direction("a", 10))
+        self.assertIsNone(motor_controller.step_delay_for_direction("a", 20))
+        self.assertIsNotNone(motor_controller.step_delay_for_direction("a", 30))
 
     def test_acceleration_approaches_target_without_jumping(self):
         start = motor_controller.STARTUP_STEP_DELAY
@@ -126,16 +128,25 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
         motor_controller.applied_direction_changed_at = 100.0
         with patch.object(motor_controller.random, "choice", return_value="a"):
             direction, immediate = motor_controller.apply_rotation_preferences(
-                "c", {"direction": "auto", "hold": True}, now=102.0
+                "c", {"direction": "manual", "hold": True}, now=102.0
             )
         self.assertEqual(direction, "c")
         self.assertFalse(immediate)
+
+    def test_auto_mode_allows_immediate_direction_flip_even_when_hold_is_on(self):
+        motor_controller.applied_direction = "c"
+        motor_controller.applied_direction_changed_at = 100.0
+        direction, immediate = motor_controller.apply_rotation_preferences(
+            "a", {"direction": "auto", "hold": True}, now=100.1
+        )
+        self.assertEqual(direction, "a")
+        self.assertTrue(immediate)
 
     def test_hold_setting_allows_calculated_change_after_five_seconds(self):
         motor_controller.applied_direction = "c"
         motor_controller.applied_direction_changed_at = 100.0
         direction, immediate = motor_controller.apply_rotation_preferences(
-            "a", {"direction": "auto", "hold": True}, now=105.0
+            "a", {"direction": "manual", "hold": True}, now=105.0
         )
         self.assertEqual(direction, "a")
         self.assertEqual(motor_controller.applied_direction_changed_at, 105.0)
@@ -147,6 +158,41 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
             motor_controller.MIN_STEP_DELAY,
         )
         self.assertIsNone(motor_controller.calculate_step_delay(0))
+
+    def test_auto_mode_flips_direction_with_50_percent_probability_only_at_30_or_40_rpm(self):
+        with patch.object(motor_controller.random, "random", return_value=0.1):
+            direction = motor_controller.apply_auto_anti_clockwise_randomization(
+                "c",
+                30,
+                {"direction": "auto", "hold": False},
+                False,
+            )
+            self.assertEqual(direction, "a")
+
+        with patch.object(motor_controller.random, "random", return_value=0.9):
+            direction = motor_controller.apply_auto_anti_clockwise_randomization(
+                "a",
+                40,
+                {"direction": "auto", "hold": False},
+                False,
+            )
+            self.assertEqual(direction, "a")
+
+        direction = motor_controller.apply_auto_anti_clockwise_randomization(
+            "c",
+            20,
+            {"direction": "auto", "hold": False},
+            False,
+        )
+        self.assertEqual(direction, "c")
+
+        direction = motor_controller.apply_auto_anti_clockwise_randomization(
+            "c",
+            30,
+            {"direction": "manual", "hold": False},
+            False,
+        )
+        self.assertEqual(direction, "c")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 {
   "used_attackers": [],
-  "seen_turns": [],
-  "last_turn": null,
-  "completed": false
+  "seen_turns": [
+    "watch1"
+  ],
+  "last_turn": "watch1",
+  "completed": true
 }

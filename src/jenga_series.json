@@ -1,1 +1,24 @@
-{}
+{
+  "series_id": "20260821_180114",
+  "game_number": 1,
+  "total_sets": 3,
+  "active": true,
+  "set_finished": false,
+  "scoring_mode": "success",
+  "watch_ids": [
+    "watch1"
+  ],
+  "scores": {
+    "watch1": {
+      "survival_score": 0,
+      "interference_score": 0,
+      "ranking_bonus": 0,
+      "total_score": 0
+    }
+  },
+  "set_history": [],
+  "current_set_events": [],
+  "attack_events": [],
+  "final_ranking": [],
+  "last_set_result": {}
+}

@@ -450,18 +450,33 @@ def apply_rotation_preferences(calculated_direction, preferences, now=None):
     current_time = time.monotonic() if now is None else now
     requested = preferences.get("direction", "auto")
     candidate = requested if requested in {"c", "a"} else calculated_direction
-    immediate = not bool(preferences.get("hold", True))
+    auto_mode = requested == "auto"
+    immediate = auto_mode or not bool(preferences.get("hold", True))
 
     with applied_direction_lock:
         if applied_direction is None:
             applied_direction = candidate
             applied_direction_changed_at = current_time
         elif candidate != applied_direction:
-            # hold時は「実際に方向が変わった時刻」から最低5秒キープする。
-            if immediate or current_time - applied_direction_changed_at >= 5.0:
+            # 自動方向は確率で毎秒切り替えるため、5秒保持を無効化して即時適用する。
+            if auto_mode or immediate or current_time - applied_direction_changed_at >= 5.0:
                 applied_direction = candidate
                 applied_direction_changed_at = current_time
         return applied_direction, immediate
+
+
+def apply_auto_anti_clockwise_randomization(calculated_direction, rpm, preferences, is_attack_mode):
+    """自動方向設定時のみ、30/40 RPM で 50% の確率で方向を反転させる。"""
+    if is_attack_mode:
+        return calculated_direction
+    requested = preferences.get("direction", "auto")
+    if requested != "auto":
+        return calculated_direction
+    if float(rpm) not in {30.0, 40.0}:
+        return calculated_direction
+    if random.random() < 0.5:
+        return "a" if calculated_direction == "c" else "c"
+    return calculated_direction
 
 def get_attack_status(current_turn):
     try:
@@ -861,6 +876,12 @@ def data_fetch_loop():
                 rpm, direction, attackers = apply_attack_effect(current_turn, rpm, direction, attack_status=attack_status)
 
             direction_preferences = get_rotation_preferences()
+            direction = apply_auto_anti_clockwise_randomization(
+                direction,
+                rpm,
+                direction_preferences,
+                bool(attack_status.get("attack_mode")),
+            )
             direction, immediate_direction = apply_rotation_preferences(
                 direction,
                 direction_preferences,
