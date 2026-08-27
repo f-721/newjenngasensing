@@ -14,8 +14,9 @@ import random
 # --------------------
 motorPins = (18, 23, 24, 25)
 # UIのa/c指定に応じてGPIO相順を反転し、実際の回転方向を切り替える。
-CLOCKWISE_PHASE_DELTA = -1
-COUNTERCLOCKWISE_PHASE_DELTA = 1
+# 実機基準では c=反時計回り、a=時計回り。
+COUNTERCLOCKWISE_PHASE_DELTA = -1
+CLOCKWISE_PHASE_DELTA = 1
 
 # 28BYJ-48 はULN2003基板との組み合わせでは8相ハーフステップ駆動にする。
 # 減速機の個体差はあるが、出力軸1回転は約4096ハーフステップ。
@@ -46,25 +47,27 @@ HIGH_TORQUE_SEQUENCE = (
 # RPM変更時に一瞬止まるため、全速度で同じ2相励磁を使う。
 USE_HIGH_TORQUE_DRIVE = True
 
-# 実機の負荷では40 RPM相当のステップ周期で脱調するため、
-# 40 RPM要求は30 RPM相当の安全な上限へ制限する。
+# 未定義の高RPM指定では、脱調防止のためステップ周期に下限を設ける。
 MIN_STEP_DELAY = 0.0003
 STEPS_PER_BATCH = 16
 
 # 画面・ゲーム内のRPM値を、28BYJ-48が脱調しにくい体感速度へ割り当てる。
 # 値は1ハーフステップ当たりの秒数（小さいほど速い）。
 RPM_STEP_DELAYS = {
-    10: 0.0020,  # かなりゆっくり
-    20: 0.0018,  # 程々
-    30: 0.0013,  # 少し速い
-    40: 0.0013,  # 30 RPM相当の安全上限
+    10: 0.0040,  # ゆっくり（従来の約半速）
+    20: 0.0025,  # 中低速
+    30: 0.0018,  # 中高速
+    40: 0.0013,  # 高速
 }
-# 実機ではa方向の機構負荷が大きく、c方向と同じ速度では脱調するため、
-# a方向は少しステップ間隔を長くしてトルクと体感速度を揃える。
-COUNTERCLOCKWISE_DELAY_MULTIPLIER = 1.0
-# 反時計回りは同じRPMでも体感速度が変わりやすく、特に30/40では差が出やすい。
-# ここで補正を入れて、時計回りと同じ感覚になるようにする。
-COUNTERCLOCKWISE_MIN_RPM = 30
+# 時計回り(a)は低速周期から直接始動せず、動作実績がある30 RPM相当の
+# 周期から始動してから、各RPMの目標周期へ滑らかに移行する。
+CLOCKWISE_STARTUP_STEP_DELAY = 0.0013 * 1.20
+CLOCKWISE_STEP_DELAYS = {
+    10: 0.0040,
+    20: 0.0025,
+    30: CLOCKWISE_STARTUP_STEP_DELAY,
+    40: 0.0013,
+}
 STARTUP_STEP_DELAY = RPM_STEP_DELAYS[10]
 ACCELERATION_RATE = 0.04
 
@@ -106,7 +109,7 @@ ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
 ROTATION_SETTINGS_API_URL = f'{API_HOST}/get_rotation_settings'
 
 # ゲーム用: 妨害なし、または妨害チャレンジ未達成中の固定回転。
-# 現在は5秒単位で10 RPM・時計回り(c)。c=時計回り、a=反時計回り。
+# 現在は5秒単位で10 RPM・反時計回り(c)。c=反時計回り、a=時計回り。
 NO_ATTACK_FALLBACK_RPM = 10
 NO_ATTACK_FALLBACK_DIRECTION = "c"
 NO_ATTACK_FALLBACK_SECONDS = 5.0
@@ -166,10 +169,29 @@ turn_start_heartbeats_lock = threading.Lock()
 
 attack_direction_cache = {}
 attack_direction_lock = threading.Lock()
+random_direction_cache = {}
+random_direction_lock = threading.Lock()
 
 applied_direction = None
 applied_direction_changed_at = 0.0
 applied_direction_lock = threading.Lock()
+
+
+def get_interval_random_direction(cache_key, interval_seconds=3.0, now=None):
+    """同じ時間帯では方向を固定し、指定間隔でだけ新しいランダム方向を選ぶ。"""
+    if interval_seconds is None or interval_seconds <= 0:
+        return random.choice(["c", "a"])
+
+    current_time = time.monotonic() if now is None else now
+    period_index = int(current_time // interval_seconds)
+    cache_slot = (cache_key, interval_seconds)
+    with random_direction_lock:
+        cached = random_direction_cache.get(cache_slot)
+        if cached is None or cached[0] != period_index:
+            direction = random.choice(["c", "a"])
+            random_direction_cache[cache_slot] = (period_index, direction)
+            return direction
+        return cached[1]
 
 # --------------------
 # GPIOセットアップ
@@ -217,34 +239,42 @@ def approach_step_delay(current, target):
 
 def phase_delta_for_direction(direction):
     return (
-        CLOCKWISE_PHASE_DELTA
+        COUNTERCLOCKWISE_PHASE_DELTA
         if direction == 'c'
-        else COUNTERCLOCKWISE_PHASE_DELTA
+        else CLOCKWISE_PHASE_DELTA
     )
 
 
-def counterclockwise_delay_multiplier_for_rpm(rpm):
-    rpm_value = float(rpm)
-    if rpm_value >= 40:
-        return 1.25
-    if rpm_value >= 30:
-        return 1.20
-    return 1.35
-
-
 def step_delay_for_direction(direction, rpm):
-    effective_rpm = rpm
+    """方向ごとの実機特性を考慮したステップ間隔を返す。"""
     if direction == 'a':
-        # 実機の起動特性上、反時計回りは 30 RPM 未満を出力しない。
-        if float(rpm) < float(COUNTERCLOCKWISE_MIN_RPM):
+        try:
+            rpm_value = float(rpm)
+        except (TypeError, ValueError):
             return None
-        effective_rpm = float(COUNTERCLOCKWISE_MIN_RPM)
-    delay = calculate_step_delay(effective_rpm)
-    if delay is None:
-        return None
+        if rpm_value <= 0:
+            return None
+        if rpm_value in CLOCKWISE_STEP_DELAYS:
+            return CLOCKWISE_STEP_DELAYS[rpm_value]
+
+        # テーブル間の値は隣接する2点を線形補間し、速度の急変を防ぐ。
+        configured_rpms = sorted(CLOCKWISE_STEP_DELAYS)
+        for lower_rpm, upper_rpm in zip(configured_rpms, configured_rpms[1:]):
+            if lower_rpm < rpm_value < upper_rpm:
+                ratio = (rpm_value - lower_rpm) / (upper_rpm - lower_rpm)
+                lower_delay = CLOCKWISE_STEP_DELAYS[lower_rpm]
+                upper_delay = CLOCKWISE_STEP_DELAYS[upper_rpm]
+                return lower_delay + ratio * (upper_delay - lower_delay)
+
+    return calculate_step_delay(rpm)
+
+
+def starting_step_delay_for_direction(direction, target_step_delay):
+    """時計回りは安定周期で始動し、その後に目標速度へ移行する。"""
     if direction == 'a':
-        return delay * counterclockwise_delay_multiplier_for_rpm(effective_rpm)
-    return delay
+        return CLOCKWISE_STARTUP_STEP_DELAY
+
+    return max(target_step_delay, STARTUP_STEP_DELAY)
 
 
 def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH, high_torque=False):
@@ -301,7 +331,7 @@ def calculate_rpm_slow(diff):
 
 def calculate_direction(diff):
     """
-    比較基準以上なら時計回り(c)、比較基準未満なら反時計回り(a)。
+    比較基準以上なら反時計回り(c)、比較基準未満なら時計回り(a)。
     下降差モードでは呼び出し前に差の符号を反転するため、
     「基準より大きく下降した」ことが正方向として扱われる。
     """
@@ -466,7 +496,7 @@ def apply_rotation_preferences(calculated_direction, preferences, now=None):
 
 
 def apply_auto_anti_clockwise_randomization(calculated_direction, rpm, preferences, is_attack_mode):
-    """自動方向設定時のみ、30/40 RPM で 50% の確率で方向を反転させる。"""
+    """自動方向設定時のみ、30/40 RPM で 3秒ごとに方向をランダムに更新する。"""
     if is_attack_mode:
         return calculated_direction
     requested = preferences.get("direction", "auto")
@@ -474,9 +504,14 @@ def apply_auto_anti_clockwise_randomization(calculated_direction, rpm, preferenc
         return calculated_direction
     if float(rpm) not in {30.0, 40.0}:
         return calculated_direction
-    if random.random() < 0.5:
-        return "a" if calculated_direction == "c" else "c"
-    return calculated_direction
+
+    candidate = get_interval_random_direction(
+        ("auto_direction", calculated_direction, rpm),
+        3.0,
+    )
+    if candidate == calculated_direction:
+        return calculated_direction
+    return "a" if calculated_direction == "c" else "c"
 
 def get_attack_status(current_turn):
     try:
@@ -508,7 +543,7 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
         # 妨害チャレンジ成功後のゲーム演出:
         # 成功1人なら最低30 RPM、2人なら最低35 RPM、3人なら最低40 RPM。
         # 元の心拍差RPMのほうが速い場合は、そのRPMを下げずに維持する。
-        # 上昇条件は時計回り(c)、下降条件は反時計回り(a)へ固定する。
+        # 上昇条件は反時計回り(c)、下降条件は時計回り(a)へ固定する。
         challenge_direction = attack_status.get("challenge_direction")
         if challenge_direction == "up":
             rpm = max(rpm, 25 + attack_count * 5)
@@ -527,15 +562,11 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
         rpm = profile["rpm"]
 
     if profile["direction"] == "random":
-        interval = profile["direction_interval"]
-        period = int(time.time() // interval) if interval else time.time_ns()
-        cache_key = (current_turn, attack_count, period)
-        with attack_direction_lock:
-            direction = attack_direction_cache.get(cache_key)
-            if direction is None:
-                direction = random.choice(["c", "a"])
-                attack_direction_cache.clear()
-                attack_direction_cache[cache_key] = direction
+        interval = profile["direction_interval"] or 3.0
+        direction = get_interval_random_direction(
+            ("attack", current_turn, attack_count),
+            interval,
+        )
 
     return rpm, direction, attackers
 
@@ -955,22 +986,22 @@ def rotation_loop():
             for device_id, (rpm, mode_or_direction, immediate_direction) in items:
                 effective_direction = mode_or_direction
                 if mode_or_direction == "random":
-                    effective_direction = random.choice(["c", "a"])
-
-                if effective_direction == "a" and float(rpm) < float(COUNTERCLOCKWISE_MIN_RPM):
-                    print(f"[ROT] 反時計回りは {COUNTERCLOCKWISE_MIN_RPM} RPM 未満で出力しないため無視: rpm={rpm}")
-                    continue
+                    effective_direction = get_interval_random_direction(
+                        ("rotation", device_id),
+                        3.0,
+                    )
 
                 target_step_delay = step_delay_for_direction(effective_direction, rpm)
                 if target_step_delay is None:
                     continue
 
                 high_torque = USE_HIGH_TORQUE_DRIVE
-                if current_direction is None:
+                if current_direction != effective_direction:
                     current_direction = effective_direction
-                    current_step_delay = max(target_step_delay, STARTUP_STEP_DELAY)
-                else:
-                    current_direction = effective_direction
+                    current_step_delay = starting_step_delay_for_direction(
+                        effective_direction,
+                        target_step_delay,
+                    )
 
                 current_step_delay = approach_step_delay(
                     current_step_delay,

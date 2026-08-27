@@ -616,7 +616,7 @@ async function refreshCurrentTarget() {
     const info = data[current] || {};
     const target = info.target_watch || info.target || '';
     const rpm = Number.isFinite(Number(info.rpm)) ? Number(info.rpm) : null;
-    const directionNames = { c: '時計回り', a: '反時計回り' };
+    const directionNames = { c: '反時計回り', a: '時計回り' };
     const direction = directionNames[info.direction] || '未設定';
     const extremeNames = { up: '基準より最も上昇', down: '基準より最も下降' };
     const extreme = extremeNames[info.extreme] || '';
@@ -948,8 +948,8 @@ function getModeLabel(mode) {
 function getDirectionLabel(direction) {
   const directionNames = {
     auto: "自動",
-    c: "時計回り",
-    a: "反時計回り"
+    c: "反時計回り",
+    a: "時計回り"
   };
   return directionNames[direction] || direction;
 }
@@ -1099,7 +1099,7 @@ async function setManualRotation(rpm, mode) {
       showBanner(data.message || "手動回転の設定に失敗しました");
       return;
     }
-    const modeLabel = mode === "c" ? "時計回り" : mode === "a" ? "反時計回り" : "ランダム";
+    const modeLabel = mode === "c" ? "反時計回り" : mode === "a" ? "時計回り" : "ランダム";
     const statusEl = document.getElementById("manual-rotation-status");
     statusEl.innerText = `手動テスト: ${rpm} RPM / ${modeLabel}`;
     showBanner(`手動テスト回転: ${rpm} RPM / ${modeLabel}`);
@@ -1134,7 +1134,7 @@ async function loadManualRotationStatus() {
       return;
     }
     const mode = data.mode || data.direction || "c";
-    const modeLabel = mode === "c" ? "時計回り" : mode === "a" ? "反時計回り" : "ランダム";
+    const modeLabel = mode === "c" ? "反時計回り" : mode === "a" ? "時計回り" : "ランダム";
     document.getElementById("manual-rotation-status").innerText = `手動テスト: ${data.rpm} RPM / ${modeLabel}`;
   } catch (e) {
     console.error("手動テスト状態取得失敗", e);
