@@ -124,6 +124,12 @@ def load_rotation_settings():
     return {"direction": direction, "hold": hold if isinstance(hold, bool) else True}
 
 
+def is_game_start_allowed():
+    """手動テストモード選択中はゲーム開始を禁止する。"""
+    mode = load_json_file(CONTROL_FILE).get("mode")
+    return mode != "manual_test"
+
+
 def save_rotation_settings(settings):
     save_json_file(ROTATION_SETTINGS_FILE, settings)
 
@@ -736,6 +742,9 @@ def is_game_state_clear():
 
 @app.route('/start', methods=['POST'])
 def start_game():
+    if not is_game_start_allowed():
+        return jsonify({"status": "error", "message": "手動テストモード中はゲームを開始できません。通常モードに戻してから開始してください"}), 409
+
     if not is_game_state_clear():
         return jsonify({"status": "error", "message": "ゲーム状態が残っています。まず「ゲームだけリセット」または「サーバー全体リセット」を実行してください"}), 400
 
@@ -1275,6 +1284,9 @@ def get_manual_rotation():
 
 @app.route('/set_manual_rotation', methods=['POST'])
 def set_manual_rotation():
+    if load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム中は手動テスト回転を変更できません"}), 409
+
     data = request.get_json(silent=True) or {}
     mode = data.get("mode") or data.get("direction") or "c"
     if mode not in {"c", "a", "random"}:
@@ -1295,6 +1307,9 @@ def set_manual_rotation():
 
 @app.route('/clear_manual_rotation', methods=['POST'])
 def clear_manual_rotation():
+    if load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム中は手動テスト回転を停止できません"}), 409
+
     save_manual_rotation({"enabled": False, "rpm": 10, "mode": "c", "direction": "c"})
     return jsonify({"status": "ok", "manual_rotation": {"enabled": False, "rpm": 10, "mode": "c", "direction": "c"}})
 

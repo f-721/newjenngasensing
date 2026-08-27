@@ -128,26 +128,27 @@
                 <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
                 <option value="mvp">MVP: セットMVP +1点</option>
               </select>
-              <details class="challenge-toggle">
-                <summary>妨害チャレンジの詳細とルール</summary>
-                <div class="challenge-detail">
-                  <strong>妨害チャレンジ詳細</strong>
-                  <ul>
-                    <li><strong>成功回数</strong>: 妨害に成功した回数ごとに +1 点</li>
-                    <li><strong>影響度</strong>: そのセットで最も影響が大きかった人に +1 点</li>
-                    <li><strong>累積順位</strong>: 最終順位で 1 位 +2 点、2 位 +1 点</li>
-                    <li><strong>MVP</strong>: セット内で最も妨害に貢献した人に +1 点</li>
-                  </ul>
-                </div>
-                <div class="challenge-rule-box">
-                  <strong>人数別の妨害ルール</strong>
-                  <ul>
-                    <li><strong>1人</strong>: 5 → 10 → 15 → 20 → 25 → 30 RPM を 1 秒ごとに切り替え、方向は通常の判定を維持</li>
-                    <li><strong>2人</strong>: 30 RPM で回転し、5 秒ごとに方向をランダムに切り替え</li>
-                    <li><strong>3人以上</strong>: 40 RPM で回転し、3 秒ごとに方向をランダムに切り替え</li>
-                  </ul>
-                </div>
-              </details>
+            </div>
+
+            <div class="challenge-info-panel">
+              <div class="challenge-info-title">妨害チャレンジの条件とルール</div>
+              <div class="challenge-detail">
+                <strong>妨害チャレンジ詳細</strong>
+                <ul>
+                  <li><strong>成功回数</strong>: 妨害に成功した回数ごとに +1 点</li>
+                  <li><strong>影響度</strong>: そのセットで最も影響が大きかった人に +1 点</li>
+                  <li><strong>累積順位</strong>: 最終順位で 1 位 +2 点、2 位 +1 点</li>
+                  <li><strong>MVP</strong>: セット内で最も妨害に貢献した人に +1 点</li>
+                </ul>
+              </div>
+              <div class="challenge-rule-box">
+                <strong>人数別の妨害ルール</strong>
+                <ul>
+                  <li><strong>1人</strong>: 5 → 10 → 15 → 20 → 25 → 30 RPM を 1 秒ごとに切り替え、方向は通常の判定を維持</li>
+                  <li><strong>2人</strong>: 30 RPM で回転し、5 秒ごとに方向をランダムに切り替え</li>
+                  <li><strong>3人以上</strong>: 40 RPM で回転し、3 秒ごとに方向をランダムに切り替え</li>
+                </ul>
+              </div>
             </div>
 
             <div class="mode-group compact-rotation">
@@ -175,7 +176,7 @@
               </details>
             </div>
 
-            <details class="mode-group other-group" style="display:block;">
+            <details id="manual-test-rotation-panel" class="mode-group other-group" style="display:block;">
               <summary style="cursor:pointer; font-weight:bold;">設計者用テスト回転</summary>
               <div class="compact-controls" style="margin-top: 10px;">
                 <div class="mode-group-title">方向</div>

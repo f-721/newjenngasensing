@@ -20,9 +20,22 @@ class MotorControllerAttackAndCsvTest(unittest.TestCase):
         rpm, direction, attackers = motor_controller.apply_attack_effect(
             "watch1", 20, "a", attack_status=attack_status
         )
-        self.assertGreater(rpm, 20)
+        self.assertEqual(rpm, 30)
         self.assertEqual(direction, "c")
         self.assertEqual(attackers, ["watch2"])
+
+    def test_apply_attack_effect_uses_success_count_fixed_rpm(self):
+        attack_status = {
+            "attack_mode": True,
+            "challenge_direction": "up",
+            "pending_attackers": [],
+            "attackers": ["watch2"],
+        }
+        rpm, direction, _ = motor_controller.apply_attack_effect(
+            "watch1", 40, "a", attack_status=attack_status
+        )
+        self.assertEqual(rpm, 30)
+        self.assertEqual(direction, "c")
 
     def test_record_csv_snapshot_writes_live_csv_and_attack_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:

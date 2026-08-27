@@ -206,13 +206,14 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
             )
             self.assertEqual(direction, "c")
 
-        direction = motor_controller.apply_auto_anti_clockwise_randomization(
-            "c",
-            20,
-            {"direction": "auto", "hold": False},
-            False,
-        )
-        self.assertEqual(direction, "c")
+        with patch.object(motor_controller.random, "choice", return_value="a"):
+            direction = motor_controller.apply_auto_anti_clockwise_randomization(
+                "c",
+                20,
+                {"direction": "auto", "hold": False},
+                False,
+            )
+            self.assertEqual(direction, "a")
 
         direction = motor_controller.apply_auto_anti_clockwise_randomization(
             "c",
@@ -221,6 +222,13 @@ class MotorControllerGpioFallbackTest(unittest.TestCase):
             False,
         )
         self.assertEqual(direction, "c")
+
+    def test_manual_rotation_is_ignored_outside_manual_test_mode(self):
+        with patch.object(motor_controller, "get_control_mode", return_value="self_fast"):
+            self.assertFalse(motor_controller.should_apply_manual_rotation())
+
+        with patch.object(motor_controller, "get_control_mode", return_value="manual_test"):
+            self.assertTrue(motor_controller.should_apply_manual_rotation())
 
 
 if __name__ == "__main__":

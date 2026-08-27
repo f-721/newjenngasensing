@@ -93,6 +93,13 @@ async function refreshGameStatus() {
 
 async function startGame() {
   try {
+    const modeRes = await fetch("/get_control_mode");
+    const modeData = await modeRes.json();
+    if (modeData.mode === "manual_test") {
+      alert("手動テストモード中はゲームを開始できません。通常モードに戻してから開始してください");
+      return;
+    }
+
     const totalSets = document.getElementById("jengaSetCount").value;
     const res = await fetch(`/start?mode=jenga&sets=${encodeURIComponent(totalSets)}`, { method: "POST" });
     const data = await res.json();
@@ -1053,6 +1060,9 @@ async function updateModeButtons(runningOverride = null) {
     const modeButtons = document.querySelectorAll('button[onclick^="setMode("]');
     const note = document.getElementById("other-mode-note");
     const attackScoringSelector = document.getElementById("attackScoringSelector");
+    const startButton = document.querySelector('button[onclick="startGame()"]');
+    const manualTestPanel = document.getElementById("manual-test-rotation-panel");
+    const manualTestButtons = manualTestPanel ? manualTestPanel.querySelectorAll("button") : [];
 
     const canUseOtherMode = count >= 2;
 
@@ -1063,6 +1073,15 @@ async function updateModeButtons(runningOverride = null) {
       btn.disabled = running || !canUseOtherMode;
     });
     attackScoringSelector.disabled = running || controlMode !== "attack_challenge";
+    if (manualTestPanel) {
+      manualTestPanel.style.display = running ? "none" : "block";
+      manualTestButtons.forEach(btn => {
+        btn.disabled = running;
+      });
+    }
+    if (startButton) {
+      startButton.disabled = running || controlMode === "manual_test";
+    }
 
     if (running) {
       note.innerText = 'ゲーム中はモーター制御モードを変更できません';

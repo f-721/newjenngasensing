@@ -1,0 +1,6 @@
+timestamp,device_id,heartbeat,baseline,diff,abs_diff,game_phase,current_turn,control_mode,random_extreme,target_watch,is_target,rpm,direction,source_timestamp,collapse,attackers,attack_count,attack_mode,challenge_direction,score,score_change,score_reason,series_id,game_number
+1787810975729,watch1,69,83,-14,14,playing,watch1,manual_test,,watch1,True,30,c,1787807679203,,,0,,,0,,,20260827_150935,1
+1787810975729,watch2,73,69,4,4,playing,watch1,manual_test,,watch1,False,30,c,1787810973758,,,0,,,0,,,20260827_150935,1
+1787810975758,watch2,72,69,3,3,playing,watch1,manual_test,,,False,,,1787810975758,,,,,,0,,,,
+1787810976810,watch1,69,83,-14,14,playing,watch1,manual_test,,watch1,True,30,c,1787807679203,,,0,,,0,,,20260827_150935,1
+1787810976810,watch2,72,69,3,3,playing,watch1,manual_test,,watch1,False,30,c,1787810975758,,,0,,,0,,,20260827_150935,1

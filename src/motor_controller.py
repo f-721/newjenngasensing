@@ -496,13 +496,13 @@ def apply_rotation_preferences(calculated_direction, preferences, now=None):
 
 
 def apply_auto_anti_clockwise_randomization(calculated_direction, rpm, preferences, is_attack_mode):
-    """自動方向設定時のみ、30/40 RPM で 3秒ごとに方向をランダムに更新する。"""
+    """自動方向設定時のみ、10〜40 RPM で 3秒ごとに方向をランダムに更新する。"""
     if is_attack_mode:
         return calculated_direction
     requested = preferences.get("direction", "auto")
     if requested != "auto":
         return calculated_direction
-    if float(rpm) not in {30.0, 40.0}:
+    if float(rpm) not in {10.0, 20.0, 30.0, 40.0}:
         return calculated_direction
 
     candidate = get_interval_random_direction(
@@ -512,6 +512,11 @@ def apply_auto_anti_clockwise_randomization(calculated_direction, rpm, preferenc
     if candidate == calculated_direction:
         return calculated_direction
     return "a" if calculated_direction == "c" else "c"
+
+def should_apply_manual_rotation():
+    """手動テスト回転は manual_test モードのときだけ有効化する。"""
+    return get_control_mode() == "manual_test"
+
 
 def get_attack_status(current_turn):
     try:
@@ -541,18 +546,17 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
 
     if bool(attack_status.get("attack_mode")):
         # 妨害チャレンジ成功後のゲーム演出:
-        # 成功1人なら最低30 RPM、2人なら最低35 RPM、3人なら最低40 RPM。
-        # 元の心拍差RPMのほうが速い場合は、そのRPMを下げずに維持する。
-        # 上昇条件は反時計回り(c)、下降条件は時計回り(a)へ固定する。
+        # 成功人数ごとに固定RPMを決める。現在の心拍差RPMを上回ることはなく、
+        # その人数の演出RPMがそのまま適用される。
         challenge_direction = attack_status.get("challenge_direction")
         if challenge_direction == "up":
-            rpm = max(rpm, 25 + attack_count * 5)
+            rpm = 25 + attack_count * 5
             direction = "c"
         elif challenge_direction == "down":
-            rpm = max(rpm, 25 + attack_count * 5)
+            rpm = 25 + attack_count * 5
             direction = "a"
         else:
-            rpm = max(rpm, 20 + attack_count * 5)
+            rpm = 20 + attack_count * 5
         return rpm, direction, attackers
 
     if "rpm_steps" in profile:
@@ -732,7 +736,7 @@ def data_fetch_loop():
     while True:
         try:
             manual_rotation = get_manual_rotation()
-            if manual_rotation.get("enabled"):
+            if manual_rotation.get("enabled") and should_apply_manual_rotation():
                 with rotation_settings_lock:
                     rotation_settings.clear()
                     rotation_settings["manual_test"] = (
@@ -740,6 +744,12 @@ def data_fetch_loop():
                         manual_rotation["mode"],
                         False,
                     )
+                time.sleep(0.25)
+                continue
+
+            if manual_rotation.get("enabled") and not should_apply_manual_rotation():
+                with rotation_settings_lock:
+                    rotation_settings.clear()
                 time.sleep(0.25)
                 continue
 
