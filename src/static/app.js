@@ -651,52 +651,72 @@ async function refreshCurrentTarget() {
         : '比較の参考心拍: 未設定';
     }
     const attackEl = document.getElementById('attack-status');
-    if (attackEl) {
+    const attackDetailsEl = document.getElementById('attack-details');
+    if (attackEl && attackDetailsEl) {
       const attackRes = await fetch('/attack_status');
       const attackData = await attackRes.json();
       const activeAttackers = Array.isArray(attackData.attackers) ? attackData.attackers : attackers;
       const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
       const conditionNames = { up: '上昇', down: '下降' };
-      if (attackData.attack_mode && referenceEl) {
-        const requirements = attackData.challenge_requirements || {};
-        const referenceLines = Object.entries(requirements)
-          .sort(([firstWatch], [secondWatch]) => firstWatch.localeCompare(secondWatch))
-          .map(([watchId, requirement]) => {
-            const bpm = Number(requirement.reference_bpm);
-            if (!Number.isFinite(bpm)) return `${watchId}: 未設定`;
-            const label = requirement.reference_source === 'turn_start'
-              ? 'ターン交代時'
-              : '平均値';
-            return `${watchId}: ${Math.round(bpm)} BPM (${label})`;
-          });
-        referenceEl.innerText = referenceLines.length
-          ? `比較の参考心拍\n${referenceLines.join('\n')}`
-          : '比較の参考心拍: 未設定';
-      }
+
       if (!attackData.attack_mode) {
         attackEl.innerText = activeAttackers.length
           ? `妨害情報：現在参加 ${activeAttackers.join(', ')} (${activeAttackers.length}台)`
           : '妨害情報：現在参加 なし (0台)';
+        attackDetailsEl.innerHTML = '';
         return;
       }
 
       const participants = [...new Set([...activeAttackers, ...pending])];
       const requirements = attackData.challenge_requirements || {};
-      const participantLines = participants.map((watchId) => {
+
+      // Header summary
+      attackEl.innerText = `妨害情報：現在参加 ${participants.length ? participants.join(', ') : 'なし'} (${participants.length}台) / 条件：${conditionNames[attackData.challenge_direction] || '未設定'}`;
+
+      // Build table of participants
+      const rows = participants.map((watchId) => {
         const requirement = requirements[watchId] || {};
-        const threshold = Number(requirement.threshold);
+        const rawThreshold = requirement.threshold;
+        const threshold = rawThreshold == null ? null : Number(rawThreshold);
         const heartbeat = Number(requirement.heartbeat);
-        const target = Number.isFinite(threshold) ? `${Math.round(threshold)} BPM` : '未設定';
-        const current = Number.isFinite(heartbeat) ? `現在 ${Math.round(heartbeat)} BPM / ` : '';
+        const referenceBpm = Number(requirement.reference_bpm);
+        const referenceLabel = requirement.reference_source === 'turn_start' ? '交代時' : '平均値';
         const status = requirement.status || (activeAttackers.includes(watchId) ? '達成' : '挑戦中');
-        return `${watchId}：${current}ノルマ ${target} / ${status}`;
-      });
-      const participantText = participants.length ? participants.join(', ') : 'なし';
-      attackEl.innerText = [
-        `妨害情報：現在参加 ${participantText} (${participants.length}台)`,
-        `条件：${conditionNames[attackData.challenge_direction] || '未設定'}`,
-        ...participantLines,
-      ].join('\n');
+
+        const currentCell = Number.isFinite(heartbeat) ? `${Math.round(heartbeat)} BPM` : '未取得';
+        const referenceCell = Number.isFinite(referenceBpm) ? `${Math.round(referenceBpm)} BPM (${referenceLabel})` : '未設定';
+        const thresholdCell = Number.isFinite(threshold) ? `${Math.round(threshold)} BPM` : '未設定';
+
+        const statusClass = status === '達成' ? 'status-success' : status === '挑戦中' ? 'status-pending' : 'status-none';
+
+        return `
+          <tr>
+            <td><strong>${watchId}</strong></td>
+            <td>${currentCell}</td>
+            <td>${referenceCell}</td>
+            <td>${thresholdCell}</td>
+            <td><span class="attack-status-badge ${statusClass}">${status}</span></td>
+          </tr>
+        `;
+      }).join('\n');
+
+      const tableHtml = `
+        <table class="attack-table" role="table">
+          <thead>
+            <tr>
+              <th>プレイヤー</th>
+              <th>現在</th>
+              <th>参照</th>
+              <th>ノルマ</th>
+              <th>状態</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      `;
+      attackDetailsEl.innerHTML = tableHtml;
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);

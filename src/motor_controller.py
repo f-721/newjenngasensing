@@ -107,6 +107,7 @@ TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
 ROTATION_SETTINGS_API_URL = f'{API_HOST}/get_rotation_settings'
+REQUEST_TIMEOUT = 5
 
 # ゲーム用: 妨害なし、または妨害チャレンジ未達成中の固定回転。
 # 現在は5秒単位で10 RPM・反時計回り(c)。c=反時計回り、a=時計回り。
@@ -116,31 +117,35 @@ NO_ATTACK_FALLBACK_SECONDS = 5.0
 no_attack_fallback_until = 0.0
 
 # ゲーム用: 妨害成功人数ごとの演出。上の心拍差RPMより優先して適用する。
-# 1人成功: 5→10→15→20→25→30 RPMを1秒ごとに切替、通常方向を維持。
-# 2人成功: 30 RPM、5秒ごとに回転方向をランダム変更。
-# 3人以上: 40 RPM、3秒ごとに回転方向をランダム変更。
-# rpm_steps は1秒ごとに順番に切り替わる。direction_interval が0なら毎回ランダム。
+# 1人成功: 10/20/30 をランダムに選び、最低 hold 秒は維持。速度変化は step RPM ごとに段階的に移行。
+# 2人成功: 固定 30 RPM、direction_interval 秒ごとに方向をランダムに切替
+# 3人以上: 固定 40 RPM、direction_interval 秒ごとに方向をランダムに切替
 ATTACK_PROFILES = {
     1: {
-        "rpm_steps": (5, 10, 15, 20, 25, 30),
-        "direction": "normal"
+        "choices": (10, 20, 30),
+        "direction": "normal",
+        "hold": 3,
+        "step": 5,
     },
 
     2: {
         "rpm": 30,
         "direction": "random",
-        "direction_interval": 5
+        "direction_interval": 5,
     },
 
     3: {
         "rpm": 40,
         "direction": "random",
-        "direction_interval": 3
+        "direction_interval": 3,
     },
 }
 
 rotation_settings = {}
 rotation_settings_lock = threading.Lock()
+# ディスプレイ/駆動で使う現在の段階的RPM（デバイスごと）
+current_display_rpms = {}
+current_display_rpms_lock = threading.Lock()
 # モード
 # self = 自分
 # next = 次の人
@@ -175,6 +180,16 @@ random_direction_lock = threading.Lock()
 applied_direction = None
 applied_direction_changed_at = 0.0
 applied_direction_lock = threading.Lock()
+
+# 1人妨害用の状態 (現在の段階的 RPM と目標 RPM を保持)
+attack_one_current_rpm = None
+attack_one_target_rpm = None
+attack_one_last_change = 0.0
+attack_one_lock = threading.Lock()
+
+# 前回取得に成功した心拍データのキャッシュ（APIタイムアウト時に利用）
+last_heart_data = {}
+last_heart_data_lock = threading.Lock()
 
 
 def get_interval_random_direction(cache_key, interval_seconds=3.0, now=None):
@@ -280,7 +295,17 @@ def starting_step_delay_for_direction(direction, target_step_delay):
 def rotary(direction, stepSpeed, steps=STEPS_PER_BATCH, high_torque=False):
     """励磁相を呼び出し間で保持し、一定周期でハーフステップ駆動する。"""
     global motor_phase, next_step_deadline
+    # If GPIO isn't available (running in dev machine), simulate timing to avoid
+    # tight busy-looping in `rotation_loop`. This helps observe timing-related
+    # issues even when hardware is absent.
     if GPIO is None or not gpio_ready:
+        try:
+            # Sleep roughly the time that would be spent performing a batch
+            # of steps at the given stepSpeed to avoid burning CPU and to
+            # preserve loop timing behavior.
+            time.sleep(max(stepSpeed * min(steps, STEPS_PER_BATCH), 0.001))
+        except Exception:
+            pass
         return
 
     try:
@@ -377,7 +402,7 @@ def should_use_no_attack_fallback(attack_status, attackers):
 # --------------------
 def get_game_status():
     try:
-        res = requests.get(STATUS_API_URL, timeout=2)
+        res = requests.get(STATUS_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         return res.json().get("running", False)
     except Exception as e:
@@ -387,7 +412,7 @@ def get_game_status():
 
 def get_current_turn():
     try:
-        res = requests.get(TURN_API_URL, timeout=2)
+        res = requests.get(TURN_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         return res.json().get("current_turn")
     except Exception as e:
@@ -396,7 +421,7 @@ def get_current_turn():
 
 def get_heart_data():
     try:
-        res = requests.get(HEART_API_URL, timeout=2)
+        res = requests.get(HEART_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         return res.json()
     except Exception as e:
@@ -408,7 +433,7 @@ def fetch_baselines():
     baseline.json をサーバから取得してキャッシュ更新
     """
     try:
-        res = requests.get(BASELINE_API_URL, timeout=2)
+        res = requests.get(BASELINE_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         data = res.json()  # {"watch1": 68.2, ...}
 
@@ -431,7 +456,7 @@ def fetch_baselines():
 
 def get_control_mode():
     try:
-        res = requests.get(f"{API_HOST}/get_control_mode", timeout=2)
+        res = requests.get(f"{API_HOST}/get_control_mode", timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         return res.json().get("mode","self")
     except:
@@ -440,7 +465,7 @@ def get_control_mode():
 
 def get_manual_rotation():
     try:
-        res = requests.get(f"{API_HOST}/manual_rotation", timeout=2)
+        res = requests.get(f"{API_HOST}/manual_rotation", timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         data = res.json()
         if not isinstance(data, dict):
@@ -461,7 +486,7 @@ def get_manual_rotation():
 def get_rotation_preferences():
     """管理画面の方向指定と、5秒キープ/即時切替設定を取得する。"""
     try:
-        res = requests.get(ROTATION_SETTINGS_API_URL, timeout=2)
+        res = requests.get(ROTATION_SETTINGS_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         data = res.json()
         direction = data.get("direction", "auto")
@@ -520,7 +545,7 @@ def should_apply_manual_rotation():
 
 def get_attack_status(current_turn):
     try:
-        response = requests.get(ATTACK_STATUS_API_URL, timeout=2)
+        response = requests.get(ATTACK_STATUS_API_URL, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
         if data.get("current_turn") != current_turn:
@@ -540,38 +565,57 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
     attackers = [attacker for attacker in attack_status.get("attackers", []) if isinstance(attacker, str)]
     if not attackers and not bool(attack_status.get("attack_mode")):
         return rpm, direction, attackers
-
     attack_count = min(len(attackers), 3)
-    profile = ATTACK_PROFILES[attack_count] if attack_count else {"rpm": rpm, "direction": "normal"}
+    profile = ATTACK_PROFILES.get(attack_count, {"rpm": rpm, "direction": "normal"})
 
+    # 成功済みの妨害（attack_mode=true）の場合、人数別プロファイルを優先適用
     if bool(attack_status.get("attack_mode")):
-        # 妨害チャレンジ成功後のゲーム演出:
-        # 成功人数ごとに固定RPMを決める。現在の心拍差RPMを上回ることはなく、
-        # その人数の演出RPMがそのまま適用される。
-        challenge_direction = attack_status.get("challenge_direction")
-        if challenge_direction == "up":
-            rpm = 25 + attack_count * 5
-            direction = "c"
-        elif challenge_direction == "down":
-            rpm = 25 + attack_count * 5
-            direction = "a"
+        # 1人時は choices から 3秒ごとに目標をランダム選択し、現在値を step ずつ近づける
+        if attack_count == 1 and isinstance(profile.get("choices"), (list, tuple)):
+            global attack_one_current_rpm, attack_one_target_rpm, attack_one_last_change
+            now = time.monotonic()
+            with attack_one_lock:
+                # 初期化
+                if attack_one_current_rpm is None:
+                    # start from fallback or first choice
+                    attack_one_current_rpm = float(profile.get("choices")[0])
+                    attack_one_target_rpm = attack_one_current_rpm
+                    attack_one_last_change = now
+
+                hold = float(profile.get("hold", 3.0))
+                step = float(profile.get("step", 5.0))
+
+                # 目標を更新するタイミング
+                if attack_one_target_rpm is None or (now - attack_one_last_change) >= hold:
+                    # 選択肢からランダムに選ぶ（現在と同じでも構わないが、出来れば変える）
+                    choices = list(profile.get("choices"))
+                    if attack_one_target_rpm in choices and len(choices) > 1:
+                        choices.remove(int(attack_one_target_rpm))
+                    attack_one_target_rpm = float(random.choice(choices))
+                    attack_one_last_change = now
+
+                # 現在値を目標へ step ごとに近づける
+                if attack_one_current_rpm < attack_one_target_rpm:
+                    attack_one_current_rpm = min(attack_one_current_rpm + step, attack_one_target_rpm)
+                elif attack_one_current_rpm > attack_one_target_rpm:
+                    attack_one_current_rpm = max(attack_one_current_rpm - step, attack_one_target_rpm)
+
+                rpm = int(round(attack_one_current_rpm))
+
         else:
-            rpm = 20 + attack_count * 5
+            # 2人以上の固定演出
+            if "rpm" in profile:
+                rpm = profile.get("rpm")
+
+            pdirection = profile.get("direction")
+            if pdirection == "random":
+                interval = profile.get("direction_interval") or 3.0
+                direction = get_interval_random_direction(("attack_success", current_turn, attack_count), interval)
+            # 'normal' は保持
+
         return rpm, direction, attackers
 
-    if "rpm_steps" in profile:
-        step_index = int(time.time()) % len(profile["rpm_steps"])
-        rpm = profile["rpm_steps"][step_index]
-    else:
-        rpm = profile["rpm"]
-
-    if profile["direction"] == "random":
-        interval = profile["direction_interval"] or 3.0
-        direction = get_interval_random_direction(
-            ("attack", current_turn, attack_count),
-            interval,
-        )
-
+    # pending（未成功）時は ATTACK_PROFILES を適用せず通常rpm/directionを返す
     return rpm, direction, attackers
 
 def publish_rotation_status(
@@ -609,7 +653,7 @@ def publish_rotation_status(
                 "pending_attackers": attack_context.get("pending_attackers", []) if attack_context else [],
                 "attack_count": attack_context.get("attack_count", len(attackers or [])) if attack_context else len(attackers or []),
             },
-            timeout=2,
+            timeout=REQUEST_TIMEOUT,
         )
     except requests.RequestException:
         pass
@@ -619,7 +663,7 @@ def publish_rotation_status(
 # --------------------
 def get_watch_ids():
     try:
-        res = requests.get(f"{API_HOST}/clients", timeout=2)
+        res = requests.get(f"{API_HOST}/clients", timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         data = res.json()
 
@@ -782,6 +826,24 @@ def data_fetch_loop():
 
             current_turn = get_current_turn()
             heart_data = get_heart_data()
+            # heart_data が空のときは直前の成功取得データを利用して継続する
+            if not heart_data:
+                with last_heart_data_lock:
+                    if last_heart_data:
+                        # キャッシュのコピーを使う（以後の処理で安全に扱えるように）
+                        heart_data = dict(last_heart_data)
+                        if time.time() - last_info > 2:
+                            print("[WARN] /heart取得失敗、前回のデータを利用して継続します")
+                            last_info = time.time()
+                    else:
+                        # キャッシュが無ければ繰り返し待つ
+                        time.sleep(1)
+                        continue
+            else:
+                # 成功取得したらキャッシュを更新
+                with last_heart_data_lock:
+                    last_heart_data.clear()
+                    last_heart_data.update(heart_data)
             # ターン変更時にだけ比較基準を固定する。
             # 初ターンは各watchの平均値、2ターン目以降は交代時点の全watch心拍を使う。
             if current_turn != last_turn:
@@ -812,7 +874,18 @@ def data_fetch_loop():
                     if snapshot:
                         print(f"[TURN REFERENCE] {current_turn}: {snapshot}")
 
+                # reset turn tracking
                 last_turn = current_turn
+
+                # When turn changes, reset 1-player attack RPM state to initial RPM (10)
+                try:
+                    global attack_one_current_rpm, attack_one_target_rpm, attack_one_last_change
+                    with attack_one_lock:
+                        attack_one_current_rpm = 10.0
+                        attack_one_target_rpm = 10.0
+                        attack_one_last_change = time.monotonic()
+                except Exception:
+                    pass
 
             if not current_turn or current_turn not in heart_data:
                 # 心拍・ターン情報の一時欠落では直前の回転を維持する。
@@ -903,6 +976,13 @@ def data_fetch_loop():
             # 妨害チャレンジ中に成功者がいない、または未成功者が残る場合だけ固定回転にする。
             # 通常モードはこの分岐へ入らず、上で計算した心拍差RPMを維持する。
             if should_fallback:
+                # If there are pending attackers (challenge ongoing but not yet successful),
+                # show a more dynamic visual feedback based on ATTACK_PROFILES instead
+                # of the single fixed fallback direction. This makes the rotation
+                # direction change for multi-player pending challenges.
+                # For pending challenges (まだ成功していない妨害がある場合)、
+                # 演出は適用せず通常のフォールバック固定回転を使う。
+                # ATTACK_PROFILES は妨害成功時（攻撃者が確定したとき）にのみ適用されるべき。
                 fallback_rpm, fallback_direction, fallback_active = get_no_attack_fallback_rotation()
                 if fallback_active:
                     rpm = fallback_rpm
@@ -977,6 +1057,7 @@ def rotation_loop():
     last_logged_items = None
     current_step_delay = None
     current_direction = None
+    last_info = 0
     while True:
         try:
             with rotation_settings_lock:
@@ -994,14 +1075,69 @@ def rotation_loop():
                 last_logged_items = current_items
 
             for device_id, (rpm, mode_or_direction, immediate_direction) in items:
+                # rpm を常にプリセットの段階のみで変化させる
+                allowed = sorted(RPM_STEP_DELAYS.keys())
+                with current_display_rpms_lock:
+                    current = current_display_rpms.get(device_id)
+                    if current is None:
+                        # 初期値は最も近いプリセットに丸める
+                        # ただし希望rpmがプリセット外の場合は最も近い上位プリセットを目標とする
+                        if rpm in allowed:
+                            current = rpm
+                        else:
+                            # rpm がプリセット外なら、現在値が未定の際は近いプリセットに初期化
+                            diffs = [(abs(a - rpm), a) for a in allowed]
+                            current = sorted(diffs)[0][1]
+                        current_display_rpms[device_id] = current
+
+                # 目標インデックスを計算し、1段ずつ近づける
+                def index_of_ge(value):
+                    for i, a in enumerate(allowed):
+                        if a >= value:
+                            return i
+                    return len(allowed) - 1
+
+                def index_of_le(value):
+                    for i in range(len(allowed)-1, -1, -1):
+                        if allowed[i] <= value:
+                            return i
+                    return 0
+
+                with current_display_rpms_lock:
+                    current = current_display_rpms.get(device_id, allowed[0])
+                if rpm in allowed:
+                    target_index = allowed.index(rpm)
+                else:
+                    # 希望rpmがプリセット外なら、現在より大きい方向は上位プリセットへ、小さい方向は下位プリセットへ向かう
+                    if rpm > current:
+                        target_index = index_of_ge(rpm)
+                    else:
+                        target_index = index_of_le(rpm)
+
+                current_index = allowed.index(current) if current in allowed else index_of_ge(current)
+                if current_index < target_index:
+                    next_index = current_index + 1
+                elif current_index > target_index:
+                    next_index = current_index - 1
+                else:
+                    next_index = current_index
+
+                with current_display_rpms_lock:
+                    new_rpm = allowed[next_index]
+                    current_display_rpms[device_id] = new_rpm
+
                 effective_direction = mode_or_direction
                 if mode_or_direction == "random":
                     effective_direction = get_interval_random_direction(
                         ("rotation", device_id),
                         3.0,
                     )
-
-                target_step_delay = step_delay_for_direction(effective_direction, rpm)
+                # 使用するrpmは段階遷移後の new_rpm
+                target_step_delay = step_delay_for_direction(effective_direction, new_rpm)
+                # Debug: log when original request was non-preset
+                if rpm not in RPM_STEP_DELAYS and time.time() - last_info > 2:
+                    print(f"[DBG] requested_rpm={rpm} -> driving_rpm={new_rpm}, target_step_delay={target_step_delay:.6f} dir={effective_direction}")
+                    last_info = time.time()
                 if target_step_delay is None:
                     continue
 

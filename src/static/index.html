@@ -33,7 +33,8 @@
             <h4>現在の心拍数</h4>
             <div id="rate"><p>読み込み中...</p></div>
             <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
-            <div id="attack-status" class="current-used">妨害受信: なし</div>
+            <div id="attack-status" class="current-used">妨害情報: 取得中...</div>
+            <div id="attack-details" class="attack-card" aria-live="polite"></div>
           </div>
           <div class="heart-rate-box">
             <h4>最大心拍数</h4>
@@ -43,174 +44,33 @@
         </div>
       </div>
 
-      <div class="two-up-row">
-        <div class="card control-card game-settings-card">
-          <h3 class="group-title">ゲームの設定</h3>
-
-          <div class="control-section">
-            <h3>ゲーム（セット数など）</h3>
-            <button onclick="startGame()">開始</button>
-            <label for="jengaSetCount">セット数</label>
-            <select id="jengaSetCount">
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3" selected>3</option>
-              <option value="5">5</option>
-            </select>
-            <button class="stop-button" onclick="stopGame()">終了</button>
-            <button id="nextGameBtn" onclick="nextJengaGame()" style="background-color:#ff9800;">次のゲームへ</button>
-            <button class="reset-button" onclick="resetServer()">リセット</button>
-            <button onclick="resetGameOnly()">ゲームだけリセット</button>
-            <button class="csv-button" onclick="exportCSV()" id="csvBtn" style="display:none;">CSV保存</button>
-          </div>
-
-          <div class="control-section">
-            <h3>ジェンガ倒壊</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <input type="text" id="collapseNotes" placeholder="メモ（任意）" style="padding: 8px; border-radius: 8px; border: 1px solid #ccc;">
-              <button onclick="recordCollapse()" style="background-color: #d32f2f;">倒壊を記録</button>
-            </div>
-            <div id="collapse-status" style="margin-top: 10px; font-size: 0.9em; color: #666;"></div>
-          </div>
-
-          <div class="control-section">
-            <h3>取得</h3>
-            <button onclick="startFetching()">開始</button>
-            <button class="stop-button" onclick="stopFetching()">停止</button>
-          </div>
-
-          <div class="control-section">
-            <h3>ターン</h3>
-            <select id="turnSelector"></select>
-            <button onclick="setTurn()">指定</button>
-            <button onclick="nextTurn()">ターン終了</button>
-          </div>
-
-          <div class="control-section">
-            <h3>平均</h3>
-            <select id="baselineSelector"></select>
-            <button onclick="calculateBaseline()">取得</button>
-            <div id="baseline-area" class="baseline-mini"></div>
-            <div id="baseline-result" class="baseline-mini"></div>
-          </div>
-        </div>
-
-        <div class="card mode-card">
-          <h3>モーター制御モード</h3>
-
-          <div class="mode-row self-other-row">
-            <div class="mode-group self-group compact-mode-group">
-              <div class="mode-group-title">自分の心拍を使う</div>
-              <button class="mode-btn self-btn" onclick="setMode('self_fast')">差が大きいほど速い</button>
-              <button class="mode-btn self-btn" onclick="setMode('self_slow')">差が大きいほど遅い</button>
-            </div>
-
-            <div class="mode-group other-group compact-mode-group">
-              <div class="mode-group-title">他人の心拍を使う</div>
-              <button class="mode-btn other-btn requires-two" onclick="setMode('next_fast')">次の人</button>
-              <button class="mode-btn other-btn requires-two" onclick="setMode('prev_fast')">前の人</button>
-              <button class="mode-btn other-btn requires-two" onclick="setMode('random_fast')">ランダム</button>
-              <div id="other-mode-note" class="mode-note"></div>
-            </div>
-
-            <div class="mode-group other-group">
-              <div class="mode-group-title">上昇・下降を使う</div>
-              <button class="mode-btn other-btn" onclick="setMode('highest_diff')">基準値より最も上がった人</button>
-              <button class="mode-btn other-btn" onclick="setMode('lowest_diff')">基準値より最も下がった人</button>
-              <button class="mode-btn other-btn" onclick="setMode('random_diff')">上昇・下降をターンごとランダム</button>
-              <div class="mode-note">1ターン目は基準値、以後はターン開始時の心拍から比較</div>
-              <button class="mode-btn other-btn" onclick="setMode('attack_challenge')">妨害チャレンジ</button>
-              <div class="mode-note">妨害信号後、上昇・下降の心拍条件を満たすと妨害成功</div>
-              <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
-              <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
-                <option value="success">成功回数: 成功 +1点</option>
-                <option value="impact">影響度: セット首位 +1点</option>
-                <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
-                <option value="mvp">MVP: セットMVP +1点</option>
-              </select>
-            </div>
-
-            <div class="challenge-info-panel">
-              <div class="challenge-info-title">妨害チャレンジの条件とルール</div>
-              <div class="challenge-detail">
-                <strong>妨害チャレンジ詳細</strong>
-                <ul>
-                  <li><strong>成功回数</strong>: 妨害に成功した回数ごとに +1 点</li>
-                  <li><strong>影響度</strong>: そのセットで最も影響が大きかった人に +1 点</li>
-                  <li><strong>累積順位</strong>: 最終順位で 1 位 +2 点、2 位 +1 点</li>
-                  <li><strong>MVP</strong>: セット内で最も妨害に貢献した人に +1 点</li>
-                </ul>
-              </div>
-              <div class="challenge-rule-box">
-                <strong>人数別の妨害ルール</strong>
-                <ul>
-                  <li><strong>1人</strong>: 5 → 10 → 15 → 20 → 25 → 30 RPM を 1 秒ごとに切り替え、方向は通常の判定を維持</li>
-                  <li><strong>2人</strong>: 30 RPM で回転し、5 秒ごとに方向をランダムに切り替え</li>
-                  <li><strong>3人以上</strong>: 40 RPM で回転し、3 秒ごとに方向をランダムに切り替え</li>
-                </ul>
-              </div>
-            </div>
-
-            <div class="mode-group compact-rotation">
-              <div class="mode-group-title">手動テスト専用</div>
-              <button class="mode-btn dir-btn small" onclick="setMode('manual_test')" style="background-color:#ff9800;">手動テストモード</button>
-              <div class="mode-note">ゲーム未開始時に、設計者用回転ボタンでモーターを確認できます</div>
-            </div>
-
-            <div class="mode-group compact-rotation">
-              <details>
-                <summary id="rotation-summary">回転設定: <span id="direction-current">自動</span> / <span id="hold-current">5秒キープ</span></summary>
-                <div class="compact-controls">
-                  <div class="mode-group-title">回転指定</div>
-                  <div class="compact-btns">
-                    <button class="mode-btn dir-btn small" onclick="setRotationDirection('auto')">自動</button>
-                    <button class="mode-btn dir-btn small" onclick="setRotationDirection('c')">反時計</button>
-                    <button class="mode-btn dir-btn small" onclick="setRotationDirection('a')">時計</button>
-                  </div>
-                  <div class="mode-group-title">切り替え</div>
-                  <div class="compact-btns">
-                    <button class="mode-btn dir-btn small" onclick="setRotationHold(true)">5秒</button>
-                    <button class="mode-btn dir-btn small" onclick="setRotationHold(false)">即時</button>
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <details id="manual-test-rotation-panel" class="mode-group other-group" style="display:block;">
-              <summary style="cursor:pointer; font-weight:bold;">設計者用テスト回転</summary>
-              <div class="compact-controls" style="margin-top: 10px;">
-                <div class="mode-group-title">方向</div>
-                <div class="compact-btns">
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'c')">反時計 10</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'c')">反時計 20</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'c')">反時計 30</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'c')">反時計 40</button>
-                </div>
-                <div class="compact-btns">
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'a')">時計 10</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'a')">時計 20</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'a')">時計 30</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'a')">時計 40</button>
-                </div>
-                <div class="compact-btns">
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(10,'random')">ランダム 10</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(20,'random')">ランダム 20</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(30,'random')">ランダム 30</button>
-                  <button class="mode-btn dir-btn small" onclick="setManualRotation(40,'random')">ランダム 40</button>
-                </div>
-                <button class="mode-btn dir-btn small" style="background-color:#f44336;" onclick="clearManualRotation()">停止</button>
-              </div>
-              <div id="manual-rotation-status" class="mode-note">手動テスト: 停止中</div>
-            </details>
-          </div>
-
-          <div id="mode-current" class="mode-current">現在の設定：未設定</div>
-        </div>
-      </div>
+      
 
       <div class="card">
         <h2>心拍数グラフ</h2>
         <div id="graph-area" class="graph-container"></div>
+        <div class="graph-links" style="margin-top:6px; display:flex; justify-content:center;">
+          <a href="/static/settings.html" class="mini-link-btn" style="padding:12px 18px; font-weight:700;">設定画面を開く</a>
+        </div>
+        <!-- Hidden placeholders so app.js can safely query moved controls -->
+        <div id="hidden-placeholders" style="display:none;">
+          <select id="jengaSetCount">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+          <button id="nextGameBtn" type="button"></button>
+          <button id="csvBtn" type="button" style="display:none;"></button>
+          <input id="collapseNotes" type="text" />
+          <div id="collapse-status"></div>
+          <select id="turnSelector"></select>
+          <select id="baselineSelector"></select>
+          <div id="baseline-area"></div>
+          <div id="baseline-result"></div>
+          <button id="resetServer" style="display:none;"></button>
+          <button id="resetGameOnly" style="display:none;"></button>
+        </div>
       </div>
     </div>
   </div>

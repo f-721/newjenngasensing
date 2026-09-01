@@ -591,6 +591,60 @@ select {
   box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
 
+.attack-card {
+  margin-top: 10px;
+  padding: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid #e1efff;
+  border-radius: 10px;
+  font-size: 0.98rem;
+}
+
+.attack-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+.attack-table th,
+.attack-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e6f3ff;
+  text-align: left;
+}
+.attack-table th {
+  background: #f0f8ff;
+  font-weight: 800;
+  color: #0b3a66;
+  font-size: 1.02rem;
+}
+.attack-table td:first-child {
+  font-weight: 900;
+  font-size: 1.02rem;
+  color: #0b3a66;
+}
+.attack-table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(235,245,255,0.6), rgba(255,255,255,0));
+}
+
+.attack-table td:nth-child(2),
+.attack-table td:nth-child(3),
+.attack-table td:nth-child(4) {
+  font-weight: 900;
+  font-size: 1.02rem;
+  color: #0b3a66;
+}
+.attack-status-badge {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 0.92rem;
+}
+.status-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.status-pending { background: #fff8e1; color: #ff8f00; border: 1px solid #ffecb3; }
+.status-none { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+.impact-value { font-weight: 900; color: #1565c0; font-size: 1.02rem; }
+
 @media (max-width: 1200px) {
   .compact-grid {
     grid-template-columns: 1fr;

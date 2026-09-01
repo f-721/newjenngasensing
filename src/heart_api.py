@@ -192,7 +192,8 @@ def auto_fill_thread():
         if not running and not baseline:
             continue
 
-        for device_id, last_ts in latest_timestamps.items():
+        # iterate over a snapshot to avoid RuntimeError if another thread updates the dict
+        for device_id, last_ts in list(latest_timestamps.items()):
             diff = now - last_ts
 
             if diff >= 1000:
@@ -285,7 +286,8 @@ def heartbeat_complement_worker():
         now = int(time.time() * 1000)
         data_file = load_json_file(DATA_FILE)
 
-        for device_id, last_time in latest_timestamps.items():
+        # iterate over a snapshot to avoid RuntimeError if another thread updates the dict
+        for device_id, last_time in list(latest_timestamps.items()):
             if device_id not in data_file or not data_file[device_id]:
                 continue
 
@@ -319,7 +321,8 @@ def heartbeat_complement_worker():
 
 @heart_api.route('/get_baselines', methods=['GET'])
 def get_baselines():
-    baseline = load_json_file('baseline.json')
+    # Use the module-level absolute path for baseline file
+    baseline = load_json_file(BASELINE_FILE)
     return jsonify(baseline)
 
 @heart_api.route('/start_baseline', methods=['POST'])

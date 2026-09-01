@@ -1,1 +1,20 @@
-{}
+{
+  "watch3": {
+    "target_watch": "watch3",
+    "mode": "attack_challenge",
+    "rpm": 10.0,
+    "direction": "c",
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0,
+    "reference_bpm": 62.5,
+    "reference_source": "baseline",
+    "baseline_bpm": 62.5,
+    "reference_heartbeats": {
+      "watch3": 62.5
+    },
+    "attack_mode": true,
+    "challenge_direction": "down",
+    "pending_attackers": []
+  }
+}

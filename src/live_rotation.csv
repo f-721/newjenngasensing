@@ -1,0 +1,12 @@
+timestamp,device_id,heartbeat,baseline,diff,abs_diff,game_phase,current_turn,control_mode,random_extreme,target_watch,is_target,rpm,direction,source_timestamp,collapse,attackers,attack_count,attack_mode,challenge_direction,score,score_change,score_reason,series_id,game_number
+1788259627277,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259627175,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259628375,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259628187,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259629501,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259629196,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259630599,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259630210,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259631682,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259631227,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259632759,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259632298,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259633864,watch3,64,63,2,2,playing,watch3,attack_challenge,,watch3,True,10,c,1788259632838,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259635031,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259634849,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259636232,watch3,65,63,3,3,playing,watch3,attack_challenge,,watch3,True,10,c,1788259634849,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259637398,watch3,67,63,5,5,playing,watch3,attack_challenge,,watch3,True,10,c,1788259636854,,,0,attack_challenge,down,0,,,20260901_194706,1
+1788259638667,watch3,68,63,6,6,playing,watch3,attack_challenge,,watch3,True,10,c,1788259637864,,,0,attack_challenge,down,0,,,20260901_194706,1
