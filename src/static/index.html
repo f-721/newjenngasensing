@@ -12,6 +12,7 @@
 
     <div class="status-card">
       <div id="turn-display-large">全員受付中</div>
+      <div id="attack-banner" class="attack-banner" aria-live="polite"></div>
       <div id="current-turn"></div>
       <div id="score-board" class="score-board"></div>
       <div id="game-score-history" class="game-score-history"></div>
@@ -66,11 +67,17 @@
           <div id="collapse-status"></div>
           <select id="turnSelector"></select>
           <select id="baselineSelector"></select>
-          <div id="baseline-area"></div>
           <div id="baseline-result"></div>
           <button id="resetServer" style="display:none;"></button>
           <button id="resetGameOnly" style="display:none;"></button>
         </div>
+      </div>
+
+      <div class="card status-summary-card">
+        <h3>現在のゲーム設定と平均値</h3>
+        <div id="mode-current" class="mode-current">現在の設定：未設定</div>
+        <div id="baseline-area" class="baseline-list" style="margin-top:8px;"></div>
+      </div>
       </div>
     </div>
   </div>

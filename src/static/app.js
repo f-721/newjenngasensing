@@ -567,6 +567,9 @@ window.onload = async () => {
   await loadCurrentRotationHold();
   await updateModeButtons();
   setInterval(updateModeButtons, 2000);
+  // 定期的に現在モードとベースラインを取得して、別画面での変更を即時反映する
+  setInterval(loadCurrentMode, 1500);
+  setInterval(loadBaselineToUI, 3000);
 
   window.addEventListener("load", async () => {
     const res = await fetch("/get_baselines");
@@ -659,11 +662,13 @@ async function refreshCurrentTarget() {
       const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
       const conditionNames = { up: '上昇', down: '下降' };
 
+      const bannerEl = document.getElementById('attack-banner');
       if (!attackData.attack_mode) {
         attackEl.innerText = activeAttackers.length
           ? `妨害情報：現在参加 ${activeAttackers.join(', ')} (${activeAttackers.length}台)`
           : '妨害情報：現在参加 なし (0台)';
         attackDetailsEl.innerHTML = '';
+        if (bannerEl) bannerEl.style.display = 'none';
         return;
       }
 
@@ -672,6 +677,14 @@ async function refreshCurrentTarget() {
 
       // Header summary
       attackEl.innerText = `妨害情報：現在参加 ${participants.length ? participants.join(', ') : 'なし'} (${participants.length}台) / 条件：${conditionNames[attackData.challenge_direction] || '未設定'}`;
+
+      // Update prominent banner on index
+      if (bannerEl) {
+        const dir = attackData.challenge_direction === 'down' ? 'down' : 'up';
+        const glyph = dir === 'up' ? '▲' : '▼';
+        bannerEl.innerHTML = `<div class="attack-banner-content"><span class="attack-arrow ${dir}">${glyph}</span><div class="attack-label">妨害チャレンジ — ${conditionNames[attackData.challenge_direction] || '未設定'}</div></div>`;
+        bannerEl.style.display = 'block';
+      }
 
       // Build table of participants
       const rows = participants.map((watchId) => {
@@ -689,8 +702,11 @@ async function refreshCurrentTarget() {
 
         const statusClass = status === '達成' ? 'status-success' : status === '挑戦中' ? 'status-pending' : 'status-none';
 
+        const arrowGlyph = attackData.challenge_direction === 'down' ? '▼' : '▲';
+        const arrowClass = attackData.challenge_direction === 'down' ? 'down' : 'up';
         return `
           <tr>
+            <td class="arrow-cell"><span class="attack-arrow small ${arrowClass}">${arrowGlyph}</span></td>
             <td><strong>${watchId}</strong></td>
             <td>${currentCell}</td>
             <td>${referenceCell}</td>
@@ -704,6 +720,7 @@ async function refreshCurrentTarget() {
         <table class="attack-table" role="table">
           <thead>
             <tr>
+              <th class="arrow-cell">方向</th>
               <th>プレイヤー</th>
               <th>現在</th>
               <th>参照</th>

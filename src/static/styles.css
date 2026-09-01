@@ -578,6 +578,63 @@ select {
   transform: translateY(0);
 }
 
+/* Prominent attack banner shown on index when attack challenge is active */
+.attack-banner {
+  display: none;
+  margin: 12px 0 6px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #fff3f2 0%, #fff7e6 100%);
+  border: 3px solid #ffd6d1;
+  box-shadow: 0 8px 26px rgba(255,130,130,0.12);
+  text-align: center;
+}
+.attack-banner .attack-banner-content {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap: 12px;
+}
+.attack-banner .attack-arrow {
+  font-size: 3.6rem;
+  line-height: 1;
+  font-weight: 900;
+  display:inline-block;
+  transform-origin: center center;
+  animation: attackArrowBounce 0.9s ease-in-out infinite;
+}
+.attack-arrow.up { color: #d32f2f; transform: translateY(-4px); }
+.attack-arrow.down { color: #1565c0; transform: translateY(4px); }
+.attack-banner .attack-label { font-size: 1.2rem; font-weight: 900; color: #333; }
+
+@keyframes attackPulse {
+  0% { transform: scale(1); box-shadow: 0 8px 26px rgba(255,130,130,0.08); }
+  50% { transform: scale(1.02); box-shadow: 0 12px 36px rgba(255,120,120,0.12); }
+  100% { transform: scale(1); box-shadow: 0 8px 26px rgba(255,130,130,0.08); }
+}
+
+@keyframes attackArrowBounce {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-6px) scale(1.06); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.attack-banner {
+  animation: attackPulse 1.6s ease-in-out infinite;
+}
+
+/* Table arrow cell */
+.attack-table td.arrow-cell,
+.attack-table th.arrow-cell { width: 72px; text-align:center; }
+.attack-table td .attack-arrow.small { font-size: 2rem; display:inline-block; }
+
+/* Reduce animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .attack-banner, .attack-banner .attack-arrow, .attack-table td .attack-arrow.small {
+    animation: none !important;
+  }
+}
+
 .current-used {
   display: inline-block;
   margin-top: 8px;
@@ -687,4 +744,45 @@ select {
 .mini-link-btn:hover {
   opacity: 1;
   background: rgba(80, 80, 80, 0.75);
+}
+
+/* Large, high-visibility summary card for mode and baselines */
+.status-summary-card {
+  padding: 14px 16px;
+  text-align: center;
+  background: linear-gradient(180deg,#ffffff 0%, #f2f9ff 100%);
+  border: 2px solid #d6eaff;
+}
+.status-summary-card h3 {
+  font-size: 1.2rem;
+  margin-bottom: 8px;
+}
+#mode-current {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #0b3a66;
+  margin: 6px 0 10px;
+}
+.baseline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.baseline-list > div {
+  background: #fff8e7;
+  border: 1px solid #ffdca8;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 1.1rem;
+  color: #6d4c00;
+  min-width: 140px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+@media (max-width: 800px) {
+  #mode-current { font-size: 1.1rem; }
+  .baseline-list > div { font-size: 1rem; min-width: 110px; }
 }
