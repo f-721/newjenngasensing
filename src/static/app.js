@@ -188,12 +188,28 @@ function getSetScoringModeLabel(mode) {
   return modeLabels[mode] || "未設定";
 }
 
-function updateSetScoreDisplay(mode = null) {
+const attackChallengeModes = new Set(["attack_challenge", "attack_challenge_wait"]);
+let currentControlMode = null;
+let latestJengaSeries = null;
+
+function renderSetStatus() {
+  if (!latestJengaSeries) return;
   const target = document.getElementById("game-number");
   if (!target) return;
-  const currentMode = mode || document.getElementById("attackScoringSelector")?.value || "success";
-  const currentPrefix = target.textContent.match(/SET\s+\d+\s*\/\s*\d+/)?.[0] || `SET 1 / 3`;
-  target.innerText = `${currentPrefix}　得点方式: ${getSetScoringModeLabel(currentMode)}`;
+  const prefix = `SET ${latestJengaSeries.game_number || 1} / ${latestJengaSeries.total_sets || 3}`;
+  target.innerText = attackChallengeModes.has(currentControlMode)
+    ? `${prefix}　得点方式: ${getSetScoringModeLabel(latestJengaSeries.scoring_mode || "success")}`
+    : prefix;
+}
+
+function updateAttackScoringVisibility() {
+  const controls = document.getElementById("attackScoringControls");
+  if (controls) controls.style.display = attackChallengeModes.has(currentControlMode) ? "block" : "none";
+}
+
+function updateSetScoreDisplay(mode = null) {
+  if (latestJengaSeries && mode) latestJengaSeries.scoring_mode = mode;
+  renderSetStatus();
 }
 
 async function refreshJengaSeries() {
@@ -201,11 +217,8 @@ async function refreshJengaSeries() {
     const res = await fetch("/jenga_series", { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
-    const scoringMode = data.scoring_mode || "success";
-    const gameNumber = document.getElementById("game-number");
-    if (gameNumber) {
-      gameNumber.innerText = `SET ${data.game_number || 1} / ${data.total_sets || 3}　得点方式: ${getSetScoringModeLabel(scoringMode)}`;
-    }
+    latestJengaSeries = data;
+    renderSetStatus();
     const setSelector = document.getElementById("jengaSetCount");
     if (setSelector && !data.active && setSelector.value !== String(data.total_sets)) {
       setSelector.value = String(data.total_sets);
@@ -1090,6 +1103,9 @@ async function setMode(mode) {
     }
 
     const label = getModeLabel(mode);
+    currentControlMode = mode;
+    updateAttackScoringVisibility();
+    renderSetStatus();
     document.getElementById("mode-current").innerText = `現在の設定：${label}`;
     showBanner(`モード変更：${label}`);
   } catch (e) {
@@ -1265,6 +1281,9 @@ async function loadCurrentMode() {
   try {
     const res = await fetch("/get_control_mode");
     const data = await res.json();
+    currentControlMode = data.mode;
+    updateAttackScoringVisibility();
+    renderSetStatus();
     const label = getModeLabel(data.mode);
     document.getElementById("mode-current").innerText = `現在の設定：${label}`;
   } catch (e) {

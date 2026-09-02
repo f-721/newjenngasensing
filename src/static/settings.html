@@ -127,13 +127,15 @@
             <button class="mode-btn other-btn" onclick="setMode('attack_challenge')">妨害チャレンジ</button>
             <button class="mode-btn other-btn" onclick="setMode('attack_challenge_wait')">待ち時間あり妨害チャレンジ</button>
             <div class="mode-note">妨害信号後、上昇・下降の心拍条件を満たすと妨害成功</div>
-            <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
-            <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
-              <option value="success">成功回数: 成功 +1点</option>
-              <option value="impact">影響度: セット首位 +1点</option>
-              <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
-              <option value="mvp">MVP: セットMVP +1点</option>
-            </select>
+            <div id="attackScoringControls">
+              <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
+              <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
+                <option value="success">成功回数: 成功 +1点</option>
+                <option value="impact">影響度: セット首位 +1点</option>
+                <option value="ranking">累積順位: 最終1位 +2点 / 2位 +1点</option>
+                <option value="mvp">MVP: セットMVP +1点</option>
+              </select>
+            </div>
           </div>
 
           <div class="challenge-info-panel">

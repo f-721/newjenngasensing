@@ -4,7 +4,7 @@
   "total_sets": 2,
   "active": false,
   "set_finished": false,
-  "scoring_mode": "success",
+  "scoring_mode": "ranking",
   "watch_ids": [],
   "scores": {},
   "set_history": [],
