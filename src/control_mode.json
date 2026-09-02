@@ -1,1 +1,3 @@
-{"mode": "attack_challenge_wait"}
+{
+  "mode": "self_fast"
+}

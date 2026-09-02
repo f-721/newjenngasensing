@@ -825,9 +825,43 @@ def start_game():
 @app.route('/jenga_series', methods=['GET'])
 def get_jenga_series():
     series = load_jenga_series()
+    # ゲーム開始前は管理画面で選択中の得点方式を表示する。
+    # 開始後は、そのシリーズ開始時に確定した方式を維持する。
+    if not series["active"]:
+        series["scoring_mode"] = load_attack_scoring()["mode"]
     return jsonify({
         **series,
         "interference_ranking": calculate_interference_ranking(series["attack_events"], series["watch_ids"]),
+    })
+
+
+@app.route('/jenga_settings', methods=['POST'])
+def set_jenga_settings():
+    """Save pre-game settings so every open screen can display the same values."""
+    if load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム中はセット数を変更できません"}), 409
+
+    series = load_jenga_series()
+    try:
+        total_sets = int((request.get_json(silent=True) or {}).get("total_sets"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "セット数が不正です"}), 400
+    if total_sets not in {1, 2, 3, 5}:
+        return jsonify({"status": "error", "message": "セット数は1、2、3、5から選択してください"}), 400
+    if series["active"] and total_sets < series["game_number"]:
+        return jsonify({
+            "status": "error",
+            "message": f"現在SET {series['game_number']} のため、それ以上のセット数を選択してください",
+        }), 409
+
+    series["total_sets"] = total_sets
+    series["scoring_mode"] = load_attack_scoring()["mode"]
+    save_jenga_series(series)
+    return jsonify({
+        "status": "ok",
+        "game_number": series["game_number"],
+        "total_sets": total_sets,
+        "scoring_mode": series["scoring_mode"],
     })
 
 
@@ -905,6 +939,8 @@ def get_game_status():
 
 @app.route('/reset', methods=['POST'])
 def reset_server():
+    global id_counter, clients
+
     save_json_file(DATA_FILE, {})
     save_json_file(CSV_HISTORY_FILE, [], log=False)
     save_json_file(GAME_STATUS_FILE, {
@@ -921,6 +957,9 @@ def reset_server():
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
+
+    clients = {}
+    id_counter = 1
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -1140,7 +1179,9 @@ def set_attack_scoring():
         return jsonify({"status": "error", "message": "ゲーム中は妨害チャレンジの得点方式を変更できません"}), 409
     if load_jenga_series()["active"]:
         return jsonify({"status": "error", "message": "連続ゲーム中は妨害チャレンジの得点方式を変更できません"}), 409
-    if load_json_file(CONTROL_FILE).get("mode") != "attack_challenge":
+
+    control_mode = load_json_file(CONTROL_FILE).get("mode")
+    if control_mode not in {"attack_challenge", "attack_challenge_wait"}:
         return jsonify({"status": "error", "message": "妨害チャレンジ選択中のみ得点方式を変更できます"}), 409
 
     mode = (request.get_json(silent=True) or {}).get("mode")
@@ -1148,7 +1189,16 @@ def set_attack_scoring():
         return jsonify({"status": "error", "message": "無効な妨害チャレンジ得点方式です"}), 400
 
     save_json_file(ATTACK_SCORING_FILE, {"mode": mode}, log=False)
-    return jsonify({"status": "ok", "mode": mode})
+    series = load_jenga_series()
+    if not series["active"]:
+        series["scoring_mode"] = mode
+        save_jenga_series(series)
+    return jsonify({
+        "status": "ok",
+        "mode": mode,
+        "game_number": series["game_number"],
+        "total_sets": series["total_sets"],
+    })
 
 
 @app.route('/get_rotation_settings')

@@ -178,18 +178,38 @@ async function nextJengaGame() {
   }
 }
 
+function getSetScoringModeLabel(mode) {
+  const modeLabels = {
+    success: "妨害成功型",
+    impact: "影響度型",
+    ranking: "累積順位型",
+    mvp: "MVP型"
+  };
+  return modeLabels[mode] || "未設定";
+}
+
+function updateSetScoreDisplay(mode = null) {
+  const target = document.getElementById("game-number");
+  if (!target) return;
+  const currentMode = mode || document.getElementById("attackScoringSelector")?.value || "success";
+  const currentPrefix = target.textContent.match(/SET\s+\d+\s*\/\s*\d+/)?.[0] || `SET 1 / 3`;
+  target.innerText = `${currentPrefix}　得点方式: ${getSetScoringModeLabel(currentMode)}`;
+}
+
 async function refreshJengaSeries() {
   try {
     const res = await fetch("/jenga_series", { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
-    const modeLabels = {
-      success: "妨害成功型",
-      impact: "影響度型",
-      ranking: "累積順位型",
-      mvp: "MVP型"
-    };
-    document.getElementById("game-number").innerText = `SET ${data.game_number || 1} / ${data.total_sets || 3}　得点方式: ${modeLabels[data.scoring_mode] || "未設定"}`;
+    const scoringMode = data.scoring_mode || "success";
+    const gameNumber = document.getElementById("game-number");
+    if (gameNumber) {
+      gameNumber.innerText = `SET ${data.game_number || 1} / ${data.total_sets || 3}　得点方式: ${getSetScoringModeLabel(scoringMode)}`;
+    }
+    const setSelector = document.getElementById("jengaSetCount");
+    if (setSelector && !data.active && setSelector.value !== String(data.total_sets)) {
+      setSelector.value = String(data.total_sets);
+    }
     const history = document.getElementById("game-score-history");
     const scoreHistory = Array.isArray(data.set_history) ? data.set_history : [];
     history.innerHTML = scoreHistory.map(result => {
@@ -333,6 +353,7 @@ async function calculateBaseline() {
 
 let turnCountdownTimer = null;
 let lastCountdownTurn = null;
+let lastAttackScoringMode = null;
 
 function setGamePhaseBanner(label, tone = 'ready') {
   const banner = document.getElementById('game-phase-banner');
@@ -402,9 +423,10 @@ async function refreshCurrentTurn() {
 
     const modeRes = await fetch('/get_control_mode', { cache: 'no-store' });
     const mode = (await modeRes.json()).mode;
-    if (mode === 'attack_challenge_wait' && document.getElementById('game-status').textContent.includes('開始中')) {
+    const gameRunning = document.getElementById('game-status').textContent.includes('開始中');
+    if (mode === 'attack_challenge_wait' && gameRunning) {
       const current = data.current_turn;
-      if (lastCountdownTurn !== current) {
+      if (!turnCountdownTimer || lastCountdownTurn !== current) {
         runTurnCountdown(5);
       }
     } else {
@@ -658,6 +680,11 @@ window.onload = async () => {
   await loadCurrentRotationHold();
   await updateModeButtons();
   setInterval(updateModeButtons, 2000);
+  setInterval(refreshGameStatus, 2000);
+  setInterval(refreshCurrentTurn, 1000);
+  // 管理画面で変更したSET情報と得点方式を、両画面へ定期反映する。
+  setInterval(refreshJengaSeries, 1000);
+  setInterval(loadAttackScoring, 1000);
   // 定期的に現在モードとベースラインを取得して、別画面での変更を即時反映する
   setInterval(loadCurrentMode, 1500);
   setInterval(loadBaselineToUI, 3000);
@@ -1208,7 +1235,10 @@ async function updateModeButtons(runningOverride = null) {
     otherButtons.forEach(btn => {
       btn.disabled = running || !canUseOtherMode;
     });
-    attackScoringSelector.disabled = running || controlMode !== "attack_challenge";
+    const attackModes = new Set(["attack_challenge", "attack_challenge_wait"]);
+    if (attackScoringSelector) {
+      attackScoringSelector.disabled = running || !attackModes.has(controlMode);
+    }
     if (manualTestPanel) {
       manualTestPanel.style.display = running ? "none" : "block";
       manualTestButtons.forEach(btn => {
@@ -1306,11 +1336,19 @@ function getAttackScoringLabel(mode) {
   return labels[mode] || mode;
 }
 
+let attackScoringSaving = false;
+let attackScoringRevision = 0;
+
 async function loadAttackScoring() {
+  if (attackScoringSaving) return;
+  const requestRevision = attackScoringRevision;
   try {
-    const res = await fetch("/attack_scoring");
+    const res = await fetch("/attack_scoring", { cache: "no-store" });
     const data = await res.json();
-    document.getElementById("attackScoringSelector").value = data.mode;
+    if (requestRevision !== attackScoringRevision || attackScoringSaving) return;
+    const selector = document.getElementById("attackScoringSelector");
+    if (selector) selector.value = data.mode;
+    updateSetScoreDisplay(data.mode);
   } catch (e) {
     console.error("妨害チャレンジ得点方式取得失敗", e);
   }
@@ -1318,23 +1356,59 @@ async function loadAttackScoring() {
 
 async function setAttackScoring() {
   const selector = document.getElementById("attackScoringSelector");
+  if (!selector) return;
+  const selectedMode = selector.value;
+  attackScoringSaving = true;
+  attackScoringRevision += 1;
   try {
     const res = await fetch("/attack_scoring", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: selector.value })
+      body: JSON.stringify({ mode: selectedMode })
     });
     const data = await res.json();
     if (!res.ok) {
       showBanner(data.message || "得点方式の変更に失敗しました");
-      await loadAttackScoring();
+      selector.value = data.mode || selectedMode;
       return;
     }
+    selector.value = data.mode;
+    updateSetScoreDisplay(data.mode);
     showBanner(`妨害チャレンジ得点方式: ${getAttackScoringLabel(data.mode)}`);
+    await refreshJengaSeries();
+    await refreshScores();
   } catch (e) {
     console.error(e);
     showBanner("得点方式の変更通信エラー");
-    await loadAttackScoring();
+    selector.value = selectedMode;
+  } finally {
+    attackScoringSaving = false;
+  }
+}
+
+async function setJengaSetCount() {
+  const selector = document.getElementById("jengaSetCount");
+  if (!selector) return;
+  const selectedSets = selector.value;
+  try {
+    const res = await fetch("/jenga_settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ total_sets: Number(selectedSets) })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showBanner(data.message || "セット数の変更に失敗しました");
+      await refreshJengaSeries();
+      return;
+    }
+    selector.value = String(data.total_sets);
+    await refreshJengaSeries();
+    showBanner(`セット数: ${data.total_sets} SET`);
+  } catch (e) {
+    console.error(e);
+    showBanner("セット数の変更通信エラー");
+    await refreshJengaSeries();
   }
 }
 

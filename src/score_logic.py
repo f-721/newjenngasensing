@@ -217,12 +217,23 @@ def attack_challenge_score_awards(attack_success, current_turn, scoring_mode):
     if not successful_watch_ids:
         return {}
 
-    impacts = {}
-    for watch_id in successful_watch_ids:
+    def score_fields(entry):
+        if not isinstance(entry, dict):
+            return (0, 0, float("inf"))
         try:
-            impacts[watch_id] = max(0.0, float(attack_success[watch_id].get("impact", 0) or 0))
+            success_count = int(entry.get("success_count", entry.get("count", 1) or 1))
         except (TypeError, ValueError):
-            impacts[watch_id] = 0.0
+            success_count = 1
+        try:
+            threshold_duration_ms = float(entry.get("threshold_duration_ms", entry.get("duration_ms", 0) or 0))
+        except (TypeError, ValueError):
+            threshold_duration_ms = 0.0
+        try:
+            success_time_ms = float(entry.get("success_time", entry.get("timestamp", float("inf")) or float("inf")))
+        except (TypeError, ValueError):
+            success_time_ms = float("inf")
+        return (success_count, threshold_duration_ms, success_time_ms)
+
     awards = {watch_id: {"points": 0, "reasons": []} for watch_id in successful_watch_ids}
 
     def add_points(watch_ids, points, reason):
@@ -233,29 +244,41 @@ def attack_challenge_score_awards(attack_success, current_turn, scoring_mode):
     if scoring_mode == "success":
         add_points(successful_watch_ids, 1, "妨害チャレンジ成功")
     elif scoring_mode == "impact":
-        add_points(successful_watch_ids, 2, "妨害チャレンジ成功")
-        best_impact = max(impacts.values())
-        add_points(
-            [watch_id for watch_id in successful_watch_ids if impacts[watch_id] == best_impact],
-            3,
-            "このターンの最大影響度ボーナス",
-        )
+        winners = []
+        best_key = None
+        for watch_id in successful_watch_ids:
+            key = score_fields(attack_success.get(watch_id))
+            if best_key is None or key[0] > best_key[0] or (key[0] == best_key[0] and key[1] > best_key[1]) or (key[0] == best_key[0] and key[1] == best_key[1] and key[2] < best_key[2]):
+                best_key = key
+                winners = [watch_id]
+            elif key[0] == best_key[0] and key[1] == best_key[1] and key[2] == best_key[2]:
+                winners.append(watch_id)
+
+        for watch_id in successful_watch_ids:
+            add_points([watch_id], 1, "妨害チャレンジ成功")
+        if winners:
+            add_points(winners, 1, "影響度: 成功数・ノルマ維持時間・早さで判定")
     elif scoring_mode == "ranking":
-        tier_points = (5, 3, 1)
-        impact_tiers = sorted(set(impacts.values()), reverse=True)
-        for points, impact in zip(tier_points, impact_tiers):
-            add_points(
-                [watch_id for watch_id in successful_watch_ids if impacts[watch_id] == impact],
-                points,
-                f"影響度順位ボーナス {points}点",
-            )
-    else:
-        best_impact = max(impacts.values())
-        add_points(
-            [watch_id for watch_id in successful_watch_ids if impacts[watch_id] == best_impact],
-            5,
-            "このターンのMVP",
+        ordered = sorted(
+            successful_watch_ids,
+            key=lambda watch_id: (
+                score_fields(attack_success.get(watch_id))[0],
+                score_fields(attack_success.get(watch_id))[1],
+                -score_fields(attack_success.get(watch_id))[2],
+            ),
+            reverse=True,
         )
+        tier_points = {0: 5, 1: 3, 2: 1}
+        for index, watch_id in enumerate(ordered[:3]):
+            if index in tier_points:
+                add_points([watch_id], tier_points[index], f"影響度順位ボーナス {tier_points[index]}点")
+    else:
+        sample = {}
+        for watch_id in successful_watch_ids:
+            sample[watch_id] = score_fields(attack_success.get(watch_id))
+        best = max(sample.values(), key=lambda item: (item[0], item[1], -item[2]))
+        mvp_winners = [watch_id for watch_id, value in sample.items() if value == best]
+        add_points(mvp_winners, 5, "このターンのMVP")
 
     return {watch_id: award for watch_id, award in awards.items() if award["points"]}
 

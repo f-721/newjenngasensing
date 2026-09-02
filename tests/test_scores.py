@@ -71,9 +71,12 @@ def test_attack_challenge_scoring_variants_use_success_impact_for_ending_turn():
         "watch2": {"points": 1, "reasons": ["妨害チャレンジ成功"]},
         "watch3": {"points": 1, "reasons": ["妨害チャレンジ成功"]},
     }
-    assert attack_challenge_score_awards(successes, "watch1", "impact") == {
-        "watch2": {"points": 5, "reasons": ["妨害チャレンジ成功", "このターンの最大影響度ボーナス"]},
-        "watch3": {"points": 2, "reasons": ["妨害チャレンジ成功"]},
+    assert attack_challenge_score_awards({
+        "watch2": {"turn": "watch1", "success_count": 2, "threshold_duration_ms": 18000, "success_time": 2000},
+        "watch3": {"turn": "watch1", "success_count": 2, "threshold_duration_ms": 18000, "success_time": 1000},
+        "watch4": {"turn": "watch1", "success_count": 1, "threshold_duration_ms": 5000, "success_time": 0},
+    }, "watch1", "impact") == {
+        "watch3": {"points": 1, "reasons": ["影響度: 成功数・ノルマ維持時間・早さで判定"]},
     }
     assert attack_challenge_score_awards(successes, "watch1", "ranking") == {
         "watch2": {"points": 5, "reasons": ["影響度順位ボーナス 5点"]},
@@ -82,6 +85,75 @@ def test_attack_challenge_scoring_variants_use_success_impact_for_ending_turn():
     assert attack_challenge_score_awards(successes, "watch1", "mvp") == {
         "watch2": {"points": 5, "reasons": ["このターンのMVP"]},
     }
+
+
+def test_wait_mode_attack_scoring_can_be_updated(monkeypatch, tmp_path):
+    configure_files(monkeypatch, tmp_path)
+    main.save_json_file(main.GAME_STATUS_FILE, {"running": False}, log=False)
+    main.save_json_file(main.CONTROL_FILE, {"mode": "attack_challenge_wait"}, log=False)
+    main.save_json_file(main.JENGA_SERIES_FILE, {}, log=False)
+
+    response = main.app.test_client().post("/attack_scoring", json={"mode": "impact"})
+
+    assert response.status_code == 200
+    assert response.get_json()["mode"] == "impact"
+    assert main.load_attack_scoring()["mode"] == "impact"
+
+
+def test_attack_scoring_update_is_reflected_in_series_status(monkeypatch, tmp_path):
+    configure_files(monkeypatch, tmp_path)
+    main.save_json_file(main.GAME_STATUS_FILE, {"running": False}, log=False)
+    main.save_json_file(main.CONTROL_FILE, {"mode": "attack_challenge"}, log=False)
+    main.save_json_file(main.JENGA_SERIES_FILE, {
+        "game_number": 2,
+        "total_sets": 5,
+        "active": False,
+        "scoring_mode": "success",
+    }, log=False)
+
+    response = main.app.test_client().post("/attack_scoring", json={"mode": "mvp"})
+    series = main.app.test_client().get("/jenga_series").get_json()
+
+    assert response.status_code == 200
+    assert response.get_json()["game_number"] == 2
+    assert response.get_json()["total_sets"] == 5
+    assert series["game_number"] == 2
+    assert series["total_sets"] == 5
+    assert series["scoring_mode"] == "mvp"
+
+
+def test_set_count_update_is_reflected_in_series_status(monkeypatch, tmp_path):
+    configure_files(monkeypatch, tmp_path)
+    main.save_json_file(main.GAME_STATUS_FILE, {"running": False}, log=False)
+    main.save_json_file(main.ATTACK_SCORING_FILE, {"mode": "impact"}, log=False)
+    main.save_json_file(main.JENGA_SERIES_FILE, {
+        "game_number": 1,
+        "total_sets": 3,
+        "active": False,
+    }, log=False)
+
+    response = main.app.test_client().post("/jenga_settings", json={"total_sets": 5})
+    series = main.app.test_client().get("/jenga_series").get_json()
+
+    assert response.status_code == 200
+    assert series["total_sets"] == 5
+    assert series["scoring_mode"] == "impact"
+
+
+def test_set_count_can_change_between_active_series_games(monkeypatch, tmp_path):
+    configure_files(monkeypatch, tmp_path)
+    main.save_json_file(main.GAME_STATUS_FILE, {"running": False}, log=False)
+    main.save_json_file(main.ATTACK_SCORING_FILE, {"mode": "success"}, log=False)
+    main.save_json_file(main.JENGA_SERIES_FILE, {
+        "game_number": 2,
+        "total_sets": 3,
+        "active": True,
+    }, log=False)
+
+    response = main.app.test_client().post("/jenga_settings", json={"total_sets": 5})
+
+    assert response.status_code == 200
+    assert main.load_jenga_series()["total_sets"] == 5
 
 
 def test_turn_change_adds_one_point_to_used_watch(monkeypatch, tmp_path):
