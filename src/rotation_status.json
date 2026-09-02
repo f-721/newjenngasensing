@@ -1,22 +1,22 @@
 {
   "watch1": {
-    "target_watch": "watch3",
+    "target_watch": "watch2",
     "mode": "attack_challenge",
-    "rpm": 10.0,
-    "direction": "c",
+    "rpm": 20.0,
+    "direction": "a",
     "extreme": null,
     "attackers": [],
     "attack_count": 0,
-    "reference_bpm": 62.5,
-    "reference_source": "baseline",
-    "baseline_bpm": 62.5,
+    "reference_bpm": 69.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 66.11111111111111,
     "reference_heartbeats": {
-      "watch3": 62.5
+      "watch2": 69.0
     },
     "attack_mode": true,
-    "challenge_direction": "down",
+    "challenge_direction": "up",
     "pending_attackers": [
-      "watch3"
+      "watch2"
     ]
   },
   "watch3": {
@@ -34,6 +34,24 @@
     "baseline_bpm": 74.77777777777777,
     "reference_heartbeats": {
       "watch1": 71.0
+    },
+    "attack_mode": true,
+    "challenge_direction": "down",
+    "pending_attackers": []
+  },
+  "watch2": {
+    "target_watch": "watch1",
+    "mode": "attack_challenge",
+    "rpm": 20.0,
+    "direction": "c",
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0,
+    "reference_bpm": 66.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 67.25,
+    "reference_heartbeats": {
+      "watch1": 66.0
     },
     "attack_mode": true,
     "challenge_direction": "down",

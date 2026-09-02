@@ -10,32 +10,24 @@ import motor_controller
 
 
 class MotorControllerAttackAndCsvTest(unittest.TestCase):
-    def test_apply_attack_effect_uses_challenge_details(self):
-        attack_status = {
-            "attack_mode": True,
-            "challenge_direction": "up",
-            "pending_attackers": ["watch2", "watch3"],
-            "attackers": ["watch2"],
-        }
-        rpm, direction, attackers = motor_controller.apply_attack_effect(
-            "watch1", 20, "a", attack_status=attack_status
-        )
-        self.assertEqual(rpm, 30)
-        self.assertEqual(direction, "c")
-        self.assertEqual(attackers, ["watch2"])
+    def test_attack_challenge_startup_fallback_uses_twenty_rpm(self):
+        rpm, direction, active = motor_controller.get_no_attack_fallback_rotation(now=0.0)
+        self.assertEqual(rpm, 20)
+        self.assertTrue(active)
+        self.assertIn(direction, {"a", "c"})
 
-    def test_apply_attack_effect_uses_success_count_fixed_rpm(self):
-        attack_status = {
-            "attack_mode": True,
-            "challenge_direction": "up",
-            "pending_attackers": [],
-            "attackers": ["watch2"],
-        }
-        rpm, direction, _ = motor_controller.apply_attack_effect(
-            "watch1", 40, "a", attack_status=attack_status
-        )
-        self.assertEqual(rpm, 30)
-        self.assertEqual(direction, "c")
+    def test_apply_attack_effect_uses_requested_success_profiles(self):
+        for attack_status, expected_rpm in [
+            ({"attack_mode": True, "challenge_direction": "up", "pending_attackers": [], "attackers": ["watch2"]}, 30),
+            ({"attack_mode": True, "challenge_direction": "up", "pending_attackers": [], "attackers": ["watch2", "watch3"]}, 40),
+            ({"attack_mode": True, "challenge_direction": "up", "pending_attackers": [], "attackers": ["watch2", "watch3", "watch4"]}, 30),
+        ]:
+            rpm, direction, attackers = motor_controller.apply_attack_effect(
+                "watch1", 20, "a", attack_status=attack_status
+            )
+            self.assertEqual(rpm, expected_rpm)
+            self.assertIn(direction, {"a", "c"})
+            self.assertEqual(attackers, attack_status["attackers"])
 
     def test_record_csv_snapshot_writes_live_csv_and_attack_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:

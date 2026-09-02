@@ -78,7 +78,7 @@ class AttackRoundAndFallbackTest(unittest.TestCase):
     def test_no_attack_fallback_rotation_is_fixed(self):
         motor_controller.no_attack_fallback_until = 0.0
         rpm, direction, active = motor_controller.get_no_attack_fallback_rotation(now=100.0)
-        self.assertEqual((rpm, direction), (10, "c"))
+        self.assertEqual((rpm, direction), (20, "c"))
         self.assertTrue(active)
 
 

@@ -1,1 +1,50 @@
-{}
+{
+  "series_id": "20260902_144615",
+  "game_number": 1,
+  "total_sets": 3,
+  "active": true,
+  "set_finished": false,
+  "scoring_mode": "success",
+  "watch_ids": [
+    "watch1",
+    "watch2"
+  ],
+  "scores": {
+    "watch1": {
+      "survival_score": 0,
+      "interference_score": 0,
+      "ranking_bonus": 0,
+      "total_score": 0
+    },
+    "watch2": {
+      "survival_score": 0,
+      "interference_score": 0,
+      "ranking_bonus": 0,
+      "total_score": 0
+    }
+  },
+  "set_history": [],
+  "current_set_events": [
+    {
+      "attacker": "watch2",
+      "timestamp": 1788328043534,
+      "impact": 0.11111111111111427,
+      "threshold": 63.111111111111114,
+      "heartbeat": 63.0,
+      "direction": "down"
+    }
+  ],
+  "attack_events": [
+    {
+      "attacker": "watch2",
+      "timestamp": 1788328043534,
+      "impact": 0.11111111111111427,
+      "threshold": 63.111111111111114,
+      "heartbeat": 63.0,
+      "direction": "down"
+    }
+  ],
+  "final_ranking": [],
+  "score_history": [],
+  "last_set_result": {}
+}

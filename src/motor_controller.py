@@ -110,34 +110,33 @@ ROTATION_SETTINGS_API_URL = f'{API_HOST}/get_rotation_settings'
 REQUEST_TIMEOUT = 5
 
 # ゲーム用: 妨害なし、または妨害チャレンジ未達成中の固定回転。
-# 現在は5秒単位で10 RPM・反時計回り(c)。c=反時計回り、a=時計回り。
-NO_ATTACK_FALLBACK_RPM = 10
+# ゲーム開始時は 20 RPM で 5 秒ごとに方向がランダムに切り替わる。
+NO_ATTACK_FALLBACK_RPM = 20
 NO_ATTACK_FALLBACK_DIRECTION = "c"
 NO_ATTACK_FALLBACK_SECONDS = 5.0
 no_attack_fallback_until = 0.0
 
 # ゲーム用: 妨害成功人数ごとの演出。上の心拍差RPMより優先して適用する。
-# 1人成功: 10/20/30 をランダムに選び、最低 hold 秒は維持。速度変化は step RPM ごとに段階的に移行。
-# 2人成功: 固定 30 RPM、direction_interval 秒ごとに方向をランダムに切替
-# 3人以上: 固定 40 RPM、direction_interval 秒ごとに方向をランダムに切替
+# 1人成功: 30 RPM、5 秒ごとに方向を逆転
+# 2人成功: 40 RPM、3 秒ごとに方向を逆転
+# 3人成功: 30/40 RPM をランダムに切替し、1 秒ごとに方向をランダムに切替
 ATTACK_PROFILES = {
     1: {
-        "choices": (10, 20, 30),
-        "direction": "normal",
-        "hold": 3,
-        "step": 5,
-    },
-
-    2: {
         "rpm": 30,
         "direction": "random",
         "direction_interval": 5,
     },
 
-    3: {
+    2: {
         "rpm": 40,
         "direction": "random",
         "direction_interval": 3,
+    },
+
+    3: {
+        "rpm_choices": (30, 40),
+        "direction": "random",
+        "direction_interval": 1,
     },
 }
 
@@ -206,6 +205,47 @@ def get_interval_random_direction(cache_key, interval_seconds=3.0, now=None):
             direction = random.choice(["c", "a"])
             random_direction_cache[cache_slot] = (period_index, direction)
             return direction
+        return cached[1]
+
+
+def get_interval_flip_direction(cache_key, interval_seconds=5.0, now=None, initial_direction="c"):
+    """指定間隔ごとに方向を反転させる。"""
+    if interval_seconds is None or interval_seconds <= 0:
+        return initial_direction
+
+    current_time = time.monotonic() if now is None else now
+    period_index = int(current_time // interval_seconds)
+    cache_slot = (cache_key, interval_seconds)
+    with random_direction_lock:
+        cached = random_direction_cache.get(cache_slot)
+        if cached is None:
+            direction = initial_direction
+            random_direction_cache[cache_slot] = (period_index, direction)
+            return direction
+        if cached[0] != period_index:
+            direction = "a" if cached[1] == "c" else "c"
+            random_direction_cache[cache_slot] = (period_index, direction)
+            return direction
+        return cached[1]
+
+
+def get_interval_random_choice(cache_key, values, interval_seconds=1.0, now=None):
+    """指定間隔ごとに値をランダム選択し、同じ区間では固定する。"""
+    if not values:
+        return None
+    values = tuple(values)
+    if interval_seconds is None or interval_seconds <= 0:
+        return random.choice(values)
+
+    current_time = time.monotonic() if now is None else now
+    period_index = int(current_time // interval_seconds)
+    cache_slot = (cache_key, values, interval_seconds)
+    with random_direction_lock:
+        cached = random_direction_cache.get(cache_slot)
+        if cached is None or cached[0] != period_index:
+            choice = random.choice(values)
+            random_direction_cache[cache_slot] = (period_index, choice)
+            return choice
         return cached[1]
 
 # --------------------
@@ -372,9 +412,14 @@ def get_no_attack_fallback_rotation(now=None):
     if no_attack_fallback_until > 0.0:
         active = current_time < no_attack_fallback_until
     else:
-        # テストの期待値に合わせて、未設定の初期値でも有効化する。
         active = True
-    return NO_ATTACK_FALLBACK_RPM, NO_ATTACK_FALLBACK_DIRECTION, active
+    direction = get_interval_flip_direction(
+        ("no_attack_fallback",),
+        NO_ATTACK_FALLBACK_SECONDS,
+        now=current_time,
+        initial_direction="c",
+    )
+    return NO_ATTACK_FALLBACK_RPM, direction, active
 
 
 def activate_no_attack_fallback(now=None):
@@ -570,49 +615,24 @@ def apply_attack_effect(current_turn, rpm, direction, attack_status=None):
 
     # 成功済みの妨害（attack_mode=true）の場合、人数別プロファイルを優先適用
     if bool(attack_status.get("attack_mode")):
-        # 1人時は choices から 3秒ごとに目標をランダム選択し、現在値を step ずつ近づける
-        if attack_count == 1 and isinstance(profile.get("choices"), (list, tuple)):
-            global attack_one_current_rpm, attack_one_target_rpm, attack_one_last_change
-            now = time.monotonic()
-            with attack_one_lock:
-                # 初期化
-                if attack_one_current_rpm is None:
-                    # start from fallback or first choice
-                    attack_one_current_rpm = float(profile.get("choices")[0])
-                    attack_one_target_rpm = attack_one_current_rpm
-                    attack_one_last_change = now
+        if "rpm_choices" in profile:
+            interval = profile.get("direction_interval") or 1.0
+            rpm = get_interval_random_choice(
+                ("attack_success_rpm", current_turn, attack_count),
+                profile.get("rpm_choices"),
+                interval,
+            )
+        elif "rpm" in profile:
+            rpm = profile.get("rpm")
 
-                hold = float(profile.get("hold", 3.0))
-                step = float(profile.get("step", 5.0))
-
-                # 目標を更新するタイミング
-                if attack_one_target_rpm is None or (now - attack_one_last_change) >= hold:
-                    # 選択肢からランダムに選ぶ（現在と同じでも構わないが、出来れば変える）
-                    choices = list(profile.get("choices"))
-                    if attack_one_target_rpm in choices and len(choices) > 1:
-                        choices.remove(int(attack_one_target_rpm))
-                    attack_one_target_rpm = float(random.choice(choices))
-                    attack_one_last_change = now
-
-                # 現在値を目標へ step ごとに近づける
-                if attack_one_current_rpm < attack_one_target_rpm:
-                    attack_one_current_rpm = min(attack_one_current_rpm + step, attack_one_target_rpm)
-                elif attack_one_current_rpm > attack_one_target_rpm:
-                    attack_one_current_rpm = max(attack_one_current_rpm - step, attack_one_target_rpm)
-
-                rpm = int(round(attack_one_current_rpm))
-
-        else:
-            # 2人以上の固定演出
-            if "rpm" in profile:
-                rpm = profile.get("rpm")
-
-            pdirection = profile.get("direction")
-            if pdirection == "random":
-                interval = profile.get("direction_interval") or 3.0
-                direction = get_interval_random_direction(("attack_success", current_turn, attack_count), interval)
-            # 'normal' は保持
-
+        pdirection = profile.get("direction")
+        if pdirection == "random":
+            interval = profile.get("direction_interval") or 3.0
+            if attack_count == 3:
+                current_direction = get_interval_random_direction(("attack_success", current_turn, attack_count), interval)
+                direction = current_direction
+            else:
+                direction = get_interval_flip_direction(("attack_success", current_turn, attack_count), interval, now=time.monotonic(), initial_direction=direction)
         return rpm, direction, attackers
 
     # pending（未成功）時は ATTACK_PROFILES を適用せず通常rpm/directionを返す
