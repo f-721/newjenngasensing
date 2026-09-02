@@ -11,7 +11,9 @@
     <h1>設定（ゲーム設定 と モーター制御）</h1>
 
     <div class="status-card">
+      <div id="game-phase-banner" class="game-phase-banner" aria-live="polite">待機</div>
       <div id="turn-display-large">全員受付中</div>
+      <div id="turn-countdown-banner" class="turn-countdown-banner" aria-live="polite"></div>
       <div id="current-turn"></div>
       <div id="score-board" class="score-board"></div>
       <div id="game-score-history" class="game-score-history"></div>
@@ -123,6 +125,7 @@
             <button class="mode-btn other-btn" onclick="setMode('random_diff')">上昇・下降をターンごとランダム</button>
             <div class="mode-note">1ターン目は基準値、以後はターン開始時の心拍から比較</div>
             <button class="mode-btn other-btn" onclick="setMode('attack_challenge')">妨害チャレンジ</button>
+            <button class="mode-btn other-btn" onclick="setMode('attack_challenge_wait')">待ち時間あり妨害チャレンジ</button>
             <div class="mode-note">妨害信号後、上昇・下降の心拍条件を満たすと妨害成功</div>
             <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
             <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
@@ -145,12 +148,11 @@
               </ul>
             </div>
             <div class="challenge-rule-box">
-              <strong>人数別の妨害ルール</strong>
+              <strong>待ち時間あり妨害チャレンジ</strong>
               <ul>
-                <li><strong>ゲーム開始時</strong>: 20 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
-                <li><strong>妨害信号到達後 1人成功</strong>: 30 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
-                <li><strong>妨害信号到達後 2人成功</strong>: 40 RPM で回転し、3 秒間隔で回転方向が逆転する</li>
-                <li><strong>妨害信号到達後 3人成功</strong>: 30 と 40 RPM をランダムに切り替え、1 秒間隔で 50% の確率で回転方向が変化する</li>
+                <li>管理画面でターンごとの待機カウントダウンを行う</li>
+                <li>メイン画面はルールのみを表示し、細かい待機説明は管理側に集約する</li>
+                <li>カウントダウン内の「次のターンまで」は表示しない</li>
               </ul>
             </div>
           </div>

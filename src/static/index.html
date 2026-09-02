@@ -12,6 +12,7 @@
 
     <div class="status-card">
       <div id="turn-display-large">全員受付中</div>
+      <div id="turn-countdown-banner" class="turn-countdown-banner" aria-live="polite"></div>
       <div id="attack-banner" class="attack-banner" aria-live="polite"></div>
       <div id="current-turn"></div>
       <div id="score-board" class="score-board"></div>
@@ -24,6 +25,16 @@
         <div id="watch-count" class="status-badge">接続中のデバイス数: 未取得</div>
         <div id="current-target" class="status-badge">利用対象: 未設定</div>
       </div>
+    </div>
+
+    <div class="challenge-rule-card">
+      <div class="challenge-info-title">妨害チャレンジのルール</div>
+      <ul>
+        <li><strong>ゲーム開始時</strong>: 20 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
+        <li><strong>妨害信号到達後 1人成功</strong>: 30 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
+        <li><strong>妨害信号到達後 2人成功</strong>: 40 RPM で回転し、3 秒間隔で回転方向が逆転する</li>
+        <li><strong>妨害信号到達後 3人成功</strong>: 30 と 40 RPM をランダムに切り替え、1 秒間隔で 50% の確率で回転方向が変化する</li>
+      </ul>
     </div>
 
     <div class="compact-grid">

@@ -936,7 +936,7 @@ def data_fetch_loop():
             # attack_challenge    : 現在手番以外（2台構成では必ず相手）
             if mode == "self_fast" or mode == "self_slow":
                 target_watch = current_turn
-            elif mode == "attack_challenge":
+            elif mode in {"attack_challenge", "attack_challenge_wait"}:
                 # 妨害チャレンジでは手番本人ではなく、相手側の心拍をRPM判定に使う。
                 target_watch = get_next_watch(current_turn)
             elif mode == "next_fast":
@@ -1061,7 +1061,7 @@ def data_fetch_loop():
                 displayed_references,
                 attack_context,
             )
-            if mode in {"attack_challenge", "self_fast", "self_slow", "next_fast", "prev_fast", "random_fast", "highest_diff", "lowest_diff", "random_diff"}:
+            if mode in {"attack_challenge", "attack_challenge_wait", "self_fast", "self_slow", "next_fast", "prev_fast", "random_fast", "highest_diff", "lowest_diff", "random_diff"}:
                 print(f"[STATE] turn={current_turn} target={target_watch} rpm={rpm} dir={direction} attackers={attackers}")
 
             time.sleep(1)

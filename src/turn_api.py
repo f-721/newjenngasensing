@@ -58,7 +58,7 @@ def award_turn_scores(current_turn):
         return
     control_mode = load_json_file(CONTROL_FILE).get("mode")
     attack_success = load_json_file(ATTACK_SUCCESS_FILE)
-    if control_mode == "attack_challenge":
+    if control_mode in {"attack_challenge", "attack_challenge_wait"}:
         scoring = load_json_file(ATTACK_SCORING_FILE)
         scoring_mode = scoring.get("mode") if isinstance(scoring, dict) else "success"
         if scoring_mode not in ATTACK_SCORING_MODES:

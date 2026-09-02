@@ -1,6 +1,6 @@
 {
-  "series_id": "20260902_144615",
-  "game_number": 1,
+  "series_id": "20260902_154755",
+  "game_number": 3,
   "total_sets": 3,
   "active": true,
   "set_finished": false,
@@ -11,40 +11,220 @@
   ],
   "scores": {
     "watch1": {
-      "survival_score": 0,
-      "interference_score": 0,
+      "survival_score": 1,
+      "interference_score": 1,
       "ranking_bonus": 0,
-      "total_score": 0
+      "total_score": 2
     },
     "watch2": {
-      "survival_score": 0,
-      "interference_score": 0,
+      "survival_score": 1,
+      "interference_score": 1,
       "ranking_bonus": 0,
-      "total_score": 0
+      "total_score": 2
     }
   },
-  "set_history": [],
-  "current_set_events": [
+  "set_history": [
     {
-      "attacker": "watch2",
-      "timestamp": 1788328043534,
-      "impact": 0.11111111111111427,
-      "threshold": 63.111111111111114,
-      "heartbeat": 63.0,
-      "direction": "down"
+      "set": 1,
+      "collapsed_player": "watch2",
+      "survivors": [
+        "watch1"
+      ],
+      "interference_success": {
+        "watch1": 1,
+        "watch2": 1
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 1,
+          "interference": 1
+        },
+        "watch2": {
+          "survival": 0,
+          "interference": 1
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        },
+        "watch2": {
+          "survival_score": 0,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 1
+        }
+      }
+    },
+    {
+      "set": 2,
+      "collapsed_player": "watch1",
+      "survivors": [
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 0,
+          "interference": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        },
+        "watch2": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        }
+      }
     }
   ],
+  "current_set_events": [],
   "attack_events": [
     {
       "attacker": "watch2",
-      "timestamp": 1788328043534,
-      "impact": 0.11111111111111427,
-      "threshold": 63.111111111111114,
-      "heartbeat": 63.0,
+      "timestamp": 1788332101348,
+      "impact": 0.0,
+      "threshold": 60.0,
+      "heartbeat": 60.0,
+      "direction": "down"
+    },
+    {
+      "attacker": "watch1",
+      "timestamp": 1788332120716,
+      "impact": 6.0,
+      "threshold": 67.0,
+      "heartbeat": 61.0,
       "direction": "down"
     }
   ],
   "final_ranking": [],
-  "score_history": [],
-  "last_set_result": {}
+  "score_history": [
+    {
+      "set": 1,
+      "collapsed_player": "watch2",
+      "survivors": [
+        "watch1"
+      ],
+      "interference_success": {
+        "watch1": 1,
+        "watch2": 1
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 1,
+          "interference": 1
+        },
+        "watch2": {
+          "survival": 0,
+          "interference": 1
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        },
+        "watch2": {
+          "survival_score": 0,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 1
+        }
+      }
+    },
+    {
+      "set": 2,
+      "collapsed_player": "watch1",
+      "survivors": [
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 0,
+          "interference": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        },
+        "watch2": {
+          "survival_score": 1,
+          "interference_score": 1,
+          "ranking_bonus": 0,
+          "total_score": 2
+        }
+      }
+    }
+  ],
+  "last_set_result": {
+    "set": 2,
+    "collapsed_player": "watch1",
+    "survivors": [
+      "watch2"
+    ],
+    "interference_success": {
+      "watch1": 0,
+      "watch2": 0
+    },
+    "mvp": null,
+    "set_points": {
+      "watch1": {
+        "survival": 0,
+        "interference": 0
+      },
+      "watch2": {
+        "survival": 1,
+        "interference": 0
+      }
+    },
+    "scores": {
+      "watch1": {
+        "survival_score": 1,
+        "interference_score": 1,
+        "ranking_bonus": 0,
+        "total_score": 2
+      },
+      "watch2": {
+        "survival_score": 1,
+        "interference_score": 1,
+        "ranking_bonus": 0,
+        "total_score": 2
+      }
+    }
+  }
 }

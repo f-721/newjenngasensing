@@ -314,7 +314,7 @@ def award_turn_scores(current_turn):
         return []
     control_mode = load_json_file(CONTROL_FILE).get("mode")
     attack_success = load_attack_success()
-    if control_mode == "attack_challenge":
+    if control_mode in {"attack_challenge", "attack_challenge_wait"}:
         awards = attack_challenge_score_awards(
             attack_success,
             current_turn,
@@ -354,7 +354,7 @@ def award_turn_scores(current_turn):
         scores = apply_points(load_scores(), targets, 1)
         save_json_file(SCORES_FILE, scores, log=False)
         timestamp = int(time.time() * 1000)
-        reason = "妨害チャレンジ成功" if control_mode == "attack_challenge" else "上昇・下降モードで心拍採用"
+        reason = "妨害チャレンジ成功" if control_mode in {"attack_challenge", "attack_challenge_wait"} else "上昇・下降モードで心拍採用"
         history = load_csv_history()
         history.extend({
             "timestamp": timestamp,
@@ -600,6 +600,9 @@ def get_attack_challenge_condition():
 
     if condition.get("turn") == current_turn and condition.get("direction") in {"up", "down"}:
         return condition
+
+    if isinstance(condition, dict) and condition.get("turn") and condition.get("turn") != current_turn:
+        reset_attack_cycle_state(reset_condition=False)
 
     previous_direction = condition.get("direction") if isinstance(condition, dict) else None
     experienced_attackers = set(condition.get("experienced_attackers", []))
@@ -1335,6 +1338,7 @@ def set_control_mode():
         "lowest_diff",
         "random_diff",
         "attack_challenge",
+        "attack_challenge_wait",
         "manual_test",
     }
 
@@ -1358,7 +1362,7 @@ def set_control_mode():
     with open(CONTROL_FILE, "w") as f:
         json.dump({"mode": mode}, f)
 
-    if mode == "attack_challenge":
+    if mode in {"attack_challenge", "attack_challenge_wait"}:
         reset_attack_cycle_state()
 
     print("[CONTROL MODE]", mode)
@@ -1419,7 +1423,7 @@ def receive_attack_signal():
     used_attackers.add(attacker)
     round_state["used_attackers"] = sorted(used_attackers)
 
-    if mode == "attack_challenge":
+    if mode in {"attack_challenge", "attack_challenge_wait"}:
         condition = get_attack_challenge_condition()
         attackers_this_turn = set(condition.get("attackers_this_turn", []))
         attackers_this_turn.add(attacker)
@@ -1458,7 +1462,7 @@ def receive_attack_signal():
 def get_current_attackers():
     current_turn = load_json_file(TURN_FILE).get("current_turn")
     update_attack_round_for_turn(current_turn, set(load_json_file(ASSIGNED_FILE).values()))
-    if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
+    if load_json_file(CONTROL_FILE).get("mode") in {"attack_challenge", "attack_challenge_wait"}:
         resolve_attack_challenge()
     attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
     return jsonify({"current_turn": current_turn, "attackers": attackers, "attack_count": len(attackers)})
@@ -1470,7 +1474,7 @@ def get_attack_status():
     current_turn = load_json_file(TURN_FILE).get("current_turn")
     mode = load_json_file(CONTROL_FILE).get("mode")
     update_attack_round_for_turn(current_turn, set(load_json_file(ASSIGNED_FILE).values()))
-    if mode != "attack_challenge":
+    if mode not in {"attack_challenge", "attack_challenge_wait"}:
         attackers = sorted(attacker for attacker, target in load_attack_targets().items() if target == current_turn)
         return jsonify({"round": game_status.get("round"), "current_turn": current_turn, "attackers": attackers})
 
@@ -1500,7 +1504,7 @@ def get_attack_status():
         "current_turn": current_turn,
         "attackers": attackers,
         "pending_attackers": pending_attackers,
-        "attack_mode": mode == "attack_challenge",
+        "attack_mode": mode in {"attack_challenge", "attack_challenge_wait"},
         "challenge_direction": condition.get("direction") if condition else None,
         "pending_thresholds": thresholds,
         "challenge_requirements": challenge_requirements,

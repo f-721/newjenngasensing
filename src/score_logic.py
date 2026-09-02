@@ -261,7 +261,7 @@ def attack_challenge_score_awards(attack_success, current_turn, scoring_mode):
 
 
 def turn_scoring_targets(control_mode, rotation_status, attack_success, current_turn):
-    if control_mode == "attack_challenge":
+    if control_mode in {"attack_challenge", "attack_challenge_wait"}:
         return challenge_successful_watch_ids(attack_success, current_turn)
     if control_mode in SCORE_MODES:
         return scoring_targets(rotation_status, current_turn)

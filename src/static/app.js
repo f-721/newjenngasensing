@@ -104,6 +104,8 @@ async function startGame() {
     const res = await fetch(`/start?mode=jenga&sets=${encodeURIComponent(totalSets)}`, { method: "POST" });
     const data = await res.json();
     if (res.ok) {
+      setGamePhaseBanner('ゲーム開始', 'start');
+      setTimeout(() => setGamePhaseBanner('開始中', 'ready'), 1200);
       alert("ゲームを開始しました");
       isGameRunning = true;
       refreshGameStatus();
@@ -111,6 +113,10 @@ async function startGame() {
       refreshScores();
       setupGraphs();
       startPlotting();
+      const mode = modeData.mode || 'self_fast';
+      if (mode === 'attack_challenge_wait') {
+        setTimeout(() => runTurnCountdown(5), 200);
+      }
     } else {
       alert(data.message || "ゲーム開始失敗");
     }
@@ -232,6 +238,10 @@ async function stopGame() {
     if (typeof stopPlotting === "function") {
       stopPlotting();
     }
+    clearInterval(turnCountdownTimer);
+    setTurnCountdown('', false);
+    setGamePhaseBanner('ゲーム終了', 'stop');
+    setTimeout(() => setGamePhaseBanner('待機', 'ready'), 1500);
     await refreshGameStatus();
     document.getElementById('csvBtn').style.display = 'inline-block';
     const heartEl = document.getElementById("heartRateDisplay");
@@ -321,6 +331,61 @@ async function calculateBaseline() {
   }
 }
 
+let turnCountdownTimer = null;
+let lastCountdownTurn = null;
+
+function setGamePhaseBanner(label, tone = 'ready') {
+  const banner = document.getElementById('game-phase-banner');
+  if (!banner) return;
+  banner.textContent = label;
+  banner.style.background = tone === 'start'
+    ? 'linear-gradient(180deg, #e8f5e9 0%, #a5d6a7 100%)'
+    : tone === 'stop'
+      ? 'linear-gradient(180deg, #ffebee 0%, #ef9a9a 100%)'
+      : 'linear-gradient(180deg, #e3f2fd 0%, #bbdefb 100%)';
+  banner.style.borderColor = tone === 'start' ? '#66bb6a' : tone === 'stop' ? '#ef5350' : '#90caf9';
+  banner.style.color = tone === 'start' ? '#1b5e20' : tone === 'stop' ? '#b71c1c' : '#0d47a1';
+}
+
+function setTurnCountdown(message, visible = true) {
+  const banner = document.getElementById('turn-countdown-banner');
+  if (!banner) return;
+  banner.textContent = message;
+  banner.classList.toggle('visible', visible);
+}
+
+async function runTurnCountdown(seconds = 5) {
+  const banner = document.getElementById('turn-countdown-banner');
+  if (!banner) return;
+
+  const currentTurnRes = await fetch('/turn', { cache: 'no-store' });
+  const currentTurnData = await currentTurnRes.json();
+  const currentTurn = currentTurnData.current_turn;
+  if (!currentTurn) {
+    setTurnCountdown('待機中', false);
+    return;
+  }
+
+  lastCountdownTurn = currentTurn;
+  clearInterval(turnCountdownTimer);
+
+  const labels = Array.from({ length: seconds }, (_, index) => String(seconds - index));
+    labels.push('GO');
+  let index = 0;
+  setTurnCountdown(labels[index]);
+
+  turnCountdownTimer = setInterval(() => {
+    index += 1;
+    if (index >= labels.length) {
+      clearInterval(turnCountdownTimer);
+      setTurnCountdown('GO', true);
+      setTimeout(() => setTurnCountdown('', false), 900);
+      return;
+    }
+    setTurnCountdown(labels[index]);
+  }, 1000);
+}
+
 async function refreshCurrentTurn() {
   try {
     const res = await fetch('/turn');
@@ -334,6 +399,18 @@ async function refreshCurrentTurn() {
       : '全員受付中';
     document.getElementById('current-turn').innerText = '今のターン: ' + display;
     document.getElementById('turn-display-large').innerText = display;
+
+    const modeRes = await fetch('/get_control_mode', { cache: 'no-store' });
+    const mode = (await modeRes.json()).mode;
+    if (mode === 'attack_challenge_wait' && document.getElementById('game-status').textContent.includes('開始中')) {
+      const current = data.current_turn;
+      if (lastCountdownTurn !== current) {
+        runTurnCountdown(5);
+      }
+    } else {
+      clearInterval(turnCountdownTimer);
+      setTurnCountdown('', false);
+    }
   } catch (error) {
     console.error(error);
     document.getElementById('current-turn').innerText = '今のターン: 取得失敗';
@@ -440,6 +517,9 @@ function setTurn() {
 
 async function nextTurn() {
   try {
+    const modeRes = await fetch('/get_control_mode', { cache: 'no-store' });
+    const mode = (await modeRes.json()).mode;
+
     const clientRes = await fetch("/clients");
     const turnRes = await fetch("/turn");
 
@@ -449,6 +529,16 @@ async function nextTurn() {
     const ids = Object.values(clients.ids).sort();
     const idx = ids.indexOf(current);
     const nextId = ids[(idx + 1) % ids.length];
+
+    if (mode === 'attack_challenge_wait') {
+      setTurnCountdown('待機中', false);
+      for (let i = 5; i >= 1; i -= 1) {
+        setTurnCountdown(`${i}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      setTurnCountdown('GO');
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
 
     const res = await fetch("/set_turn", {
       method: "POST",
@@ -463,6 +553,7 @@ async function nextTurn() {
       return;
     }
 
+    setTurnCountdown('', false);
     refreshCurrentTurn();
     refreshScores();
   } catch (e) {
@@ -678,12 +769,10 @@ async function refreshCurrentTarget() {
       // Header summary
       attackEl.innerText = `妨害情報：現在参加 ${participants.length ? participants.join(', ') : 'なし'} (${participants.length}台) / 条件：${conditionNames[attackData.challenge_direction] || '未設定'}`;
 
-      // Update prominent banner on index
+      // Keep the main banner hidden; the detailed numeric table remains the user-facing indicator.
       if (bannerEl) {
-        const dir = attackData.challenge_direction === 'down' ? 'down' : 'up';
-        const glyph = dir === 'up' ? '▲' : '▼';
-        bannerEl.innerHTML = `<div class="attack-banner-content"><span class="attack-arrow ${dir}">${glyph}</span><div class="attack-label">妨害チャレンジ — ${conditionNames[attackData.challenge_direction] || '未設定'}</div></div>`;
-        bannerEl.style.display = 'block';
+        bannerEl.style.display = 'none';
+        bannerEl.innerHTML = '';
       }
 
       // Build table of participants
@@ -695,22 +784,31 @@ async function refreshCurrentTarget() {
         const referenceBpm = Number(requirement.reference_bpm);
         const referenceLabel = requirement.reference_source === 'turn_start' ? '交代時' : '平均値';
         const status = requirement.status || (activeAttackers.includes(watchId) ? '達成' : '挑戦中');
-
-        const currentCell = Number.isFinite(heartbeat) ? `${Math.round(heartbeat)} BPM` : '未取得';
-        const referenceCell = Number.isFinite(referenceBpm) ? `${Math.round(referenceBpm)} BPM (${referenceLabel})` : '未設定';
-        const thresholdCell = Number.isFinite(threshold) ? `${Math.round(threshold)} BPM` : '未設定';
+        const directionKey = attackData.challenge_direction === 'down' ? 'down' : 'up';
+        const currentTrend = Number.isFinite(heartbeat) && Number.isFinite(referenceBpm)
+          ? (heartbeat > referenceBpm ? 'up' : heartbeat < referenceBpm ? 'down' : 'equal')
+          : 'unknown';
+        const currentCell = Number.isFinite(heartbeat)
+          ? `<strong class="current-value current-${currentTrend}">${Math.round(heartbeat)} BPM</strong>`
+          : '<strong class="current-value current-unknown">未取得</strong>';
+        const referenceCell = Number.isFinite(referenceBpm)
+          ? `<strong class="reference-value">${Math.round(referenceBpm)} BPM</strong><span class="reference-note">${referenceLabel}</span>`
+          : '<strong class="reference-value">未設定</strong>';
+        const thresholdCell = Number.isFinite(threshold)
+          ? `<strong>${Math.round(threshold)} BPM</strong>`
+          : '<strong>未設定</strong>';
 
         const statusClass = status === '達成' ? 'status-success' : status === '挑戦中' ? 'status-pending' : 'status-none';
 
-        const arrowGlyph = attackData.challenge_direction === 'down' ? '▼' : '▲';
-        const arrowClass = attackData.challenge_direction === 'down' ? 'down' : 'up';
+        const arrowGlyph = directionKey === 'down' ? '▼' : '▲';
+        const arrowClass = directionKey === 'down' ? 'down' : 'up';
         return `
           <tr>
             <td class="arrow-cell"><span class="attack-arrow small ${arrowClass}">${arrowGlyph}</span></td>
             <td><strong>${watchId}</strong></td>
-            <td>${currentCell}</td>
-            <td>${referenceCell}</td>
-            <td>${thresholdCell}</td>
+            <td class="value-${currentTrend}">${currentCell}</td>
+            <td class="reference-cell">${referenceCell}</td>
+            <td class="value-${directionKey}">${thresholdCell}</td>
             <td><span class="attack-status-badge ${statusClass}">${status}</span></td>
           </tr>
         `;
@@ -984,6 +1082,7 @@ function getModeLabel(mode) {
     lowest_diff: "基準値より最も下がった人",
     random_diff: "上昇・下降をターンごとランダム",
     attack_challenge: "妨害チャレンジ",
+    attack_challenge_wait: "待ち時間あり妨害チャレンジ",
     manual_test: "手動テストモード"
   };
   return modeNames[mode] || mode;
