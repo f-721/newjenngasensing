@@ -1,7 +1,7 @@
 """Game score calculation shared by the turn and dashboard APIs."""
 
 SCORE_MODES = {"highest_diff", "lowest_diff", "random_diff"}
-ATTACK_SCORING_MODES = {"success", "impact", "ranking", "mvp"}
+ATTACK_SCORING_MODES = {"success", "impact", "state", "mvp"}
 
 
 def empty_score_entry():
@@ -43,9 +43,37 @@ def successful_attack_events(attack_events, watch_ids):
 
 def event_impact(event):
     try:
-        return max(0.0, float(event.get("impact", 0) or 0))
+        return max(0.0, float(event.get("heart_rate_width", event.get("impact", 0)) or 0))
     except (TypeError, ValueError):
         return 0.0
+
+
+def event_achievement_time_ms(event):
+    """Return time from the attack signal to reaching its heart-rate quota."""
+    try:
+        return max(0.0, float(event.get("achievement_time_ms", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def determine_impact_winner(attack_events, watch_ids):
+    """Choose one set winner by successes, quota speed, then heart-rate width."""
+    events = successful_attack_events(attack_events, watch_ids)
+    by_attacker = {watch_id: [] for watch_id in watch_ids}
+    for event in events:
+        by_attacker[event["attacker"]].append(event)
+
+    candidates = [watch_id for watch_id in watch_ids if by_attacker[watch_id]]
+    if not candidates:
+        return None
+
+    def impact_key(watch_id):
+        successes = by_attacker[watch_id]
+        average_achievement_ms = sum(event_achievement_time_ms(event) for event in successes) / len(successes)
+        total_heart_rate_width = sum(event_impact(event) for event in successes)
+        return (-len(successes), average_achievement_ms, -total_heart_rate_width, watch_id)
+
+    return min(candidates, key=impact_key)
 
 
 def determine_interference_mvp(attack_events, watch_ids):
@@ -68,6 +96,68 @@ def determine_interference_mvp(attack_events, watch_ids):
         ((watch_id, successes) for watch_id, successes in by_attacker.items() if successes),
         key=mvp_key,
     )[0]
+
+
+def event_quota_keep_ms(event):
+    try:
+        return max(0.0, float(event.get("quota_keep_ms", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def event_quota_error_total(event):
+    try:
+        return max(0.0, float(event.get("quota_error_total", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def event_quota_sample_count(event):
+    try:
+        return max(0, int(event.get("quota_sample_count", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def calculate_state_ranking(attack_events, watch_ids):
+    """Rank players by time kept near quota, then by their average BPM error."""
+    events = successful_attack_events(attack_events, watch_ids)
+    totals = {
+        watch_id: {"quota_keep_ms": 0.0, "error_total": 0.0, "sample_count": 0}
+        for watch_id in watch_ids
+    }
+    for event in events:
+        entry = totals[event["attacker"]]
+        entry["quota_keep_ms"] += event_quota_keep_ms(event)
+        entry["error_total"] += event_quota_error_total(event)
+        entry["sample_count"] += event_quota_sample_count(event)
+
+    def average_error(watch_id):
+        entry = totals[watch_id]
+        if not entry["sample_count"]:
+            return float("inf")
+        return entry["error_total"] / entry["sample_count"]
+
+    ordered = sorted(watch_ids, key=lambda watch_id: (
+        -totals[watch_id]["quota_keep_ms"], average_error(watch_id), watch_id
+    ))
+    return [{
+        "watch_id": watch_id,
+        "rank": index + 1,
+        "quota_keep_ms": int(totals[watch_id]["quota_keep_ms"]),
+        "average_quota_error": None if average_error(watch_id) == float("inf") else average_error(watch_id),
+    } for index, watch_id in enumerate(ordered)]
+
+
+def apply_state_bonus(scores, attack_events, watch_ids):
+    """Award +1 to the single player who kept closest to quota for longest."""
+    updated = normalize_series_scores(scores, watch_ids)
+    ranking = calculate_state_ranking(attack_events, list(updated))
+    if ranking and ranking[0]["quota_keep_ms"] > 0:
+        updated[ranking[0]["watch_id"]]["ranking_bonus"] += 1
+    for entry in updated.values():
+        entry["total_score"] = entry["survival_score"] + entry["interference_score"] + entry["ranking_bonus"]
+    return updated, ranking
 
 
 def calculate_interference_ranking(attack_events, watch_ids):
@@ -117,9 +207,9 @@ def calculate_final_ranking(scores, watch_ids):
 
 
 def calculate_set_score(scores, watch_ids, collapsed_player, attack_events, scoring_mode):
-    """Apply one completed set: survivors +1 and at most one interference point per player."""
+    """Apply one completed set's survival and selected scoring-mode points."""
     updated = normalize_series_scores(scores, watch_ids)
-    set_points = {watch_id: {"survival": 0, "interference": 0} for watch_id in updated}
+    set_points = {watch_id: {"survival": 0, "interference": 0, "ranking": 0} for watch_id in updated}
     for watch_id in updated:
         if watch_id != collapsed_player:
             updated[watch_id]["survival_score"] += 1
@@ -131,8 +221,11 @@ def calculate_set_score(scores, watch_ids, collapsed_player, attack_events, scor
     if scoring_mode == "success":
         winners = successful_watch_ids
     elif scoring_mode == "impact":
-        highest_impact = max((event_impact(event) for event in events), default=None)
-        winners = sorted({event["attacker"] for event in events if event_impact(event) == highest_impact})
+        impact_winner = determine_impact_winner(events, list(updated))
+        winners = []
+        if impact_winner:
+            updated[impact_winner]["ranking_bonus"] += 1
+            set_points[impact_winner]["ranking"] = 1
     elif scoring_mode == "mvp":
         mvp = determine_interference_mvp(events, updated)
         winners = [mvp] if mvp else []
@@ -145,18 +238,6 @@ def calculate_set_score(scores, watch_ids, collapsed_player, attack_events, scor
     for entry in updated.values():
         entry["total_score"] = entry["survival_score"] + entry["interference_score"] + entry["ranking_bonus"]
     return updated, set_points, mvp
-
-
-def apply_ranking_bonus(scores, attack_events, watch_ids):
-    """Apply final +2/+1 bonuses for ranking mode exactly once at game completion."""
-    updated = normalize_series_scores(scores, watch_ids)
-    ranking = calculate_interference_ranking(attack_events, list(updated))
-    for result in ranking:
-        bonus = 2 if result["rank"] == 1 else 1 if result["rank"] == 2 else 0
-        updated[result["watch_id"]]["ranking_bonus"] += bonus
-    for entry in updated.values():
-        entry["total_score"] = entry["survival_score"] + entry["interference_score"] + entry["ranking_bonus"]
-    return updated, ranking
 
 
 def normalize_scores(data):
@@ -244,34 +325,11 @@ def attack_challenge_score_awards(attack_success, current_turn, scoring_mode):
     if scoring_mode == "success":
         add_points(successful_watch_ids, 1, "妨害チャレンジ成功")
     elif scoring_mode == "impact":
-        winners = []
-        best_key = None
-        for watch_id in successful_watch_ids:
-            key = score_fields(attack_success.get(watch_id))
-            if best_key is None or key[0] > best_key[0] or (key[0] == best_key[0] and key[1] > best_key[1]) or (key[0] == best_key[0] and key[1] == best_key[1] and key[2] < best_key[2]):
-                best_key = key
-                winners = [watch_id]
-            elif key[0] == best_key[0] and key[1] == best_key[1] and key[2] == best_key[2]:
-                winners.append(watch_id)
-
-        for watch_id in successful_watch_ids:
-            add_points([watch_id], 1, "妨害チャレンジ成功")
-        if winners:
-            add_points(winners, 1, "影響度: 成功数・ノルマ維持時間・早さで判定")
-    elif scoring_mode == "ranking":
-        ordered = sorted(
-            successful_watch_ids,
-            key=lambda watch_id: (
-                score_fields(attack_success.get(watch_id))[0],
-                score_fields(attack_success.get(watch_id))[1],
-                -score_fields(attack_success.get(watch_id))[2],
-            ),
-            reverse=True,
-        )
-        tier_points = {0: 5, 1: 3, 2: 1}
-        for index, watch_id in enumerate(ordered[:3]):
-            if index in tier_points:
-                add_points([watch_id], tier_points[index], f"影響度順位ボーナス {tier_points[index]}点")
+        # 影響度型はターンごとの成功点を付けず、セット終了時にだけ採点する。
+        return {}
+    elif scoring_mode == "state":
+        # 状態管理型はゲーム終了時にシリーズ全体の維持時間から採点する。
+        return {}
     else:
         sample = {}
         for watch_id in successful_watch_ids:

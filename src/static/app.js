@@ -164,6 +164,8 @@ async function nextJengaGame() {
     await refreshGameStatus();
     await refreshScores();
     await refreshJengaSeries();
+    await refreshScores();
+    await refreshJengaSeries();
     await refreshCurrentTurn();
     await setupGraphs();
     startPlotting();
@@ -182,7 +184,7 @@ function getSetScoringModeLabel(mode) {
   const modeLabels = {
     success: "妨害成功型",
     impact: "影響度型",
-    ranking: "累積順位型",
+    state: "状態管理型",
     mvp: "MVP型"
   };
   return modeLabels[mode] || "未設定";
@@ -231,10 +233,11 @@ async function refreshJengaSeries() {
         .map(([watchId, score]) => `${watchId}: ${score.total_score || 0}点`)
         .join(" / ");
       const mvp = result.mvp ? ` / 妨害MVP: ${result.mvp}` : "";
+      const collapsedPlayer = result.collapsed_player || "なし（終了ボタン）";
       return `
         <div class="game-score-history-item set-row">
           <div class="info-label">SET</div>
-          SET ${result.set} 終了 / 倒壊: ${result.collapsed_player}${mvp}<br>${scores}
+          SET ${result.set} 終了 / 倒壊: ${collapsedPlayer}${mvp}<br>${scores}
         </div>
       `;
     }).join("");
@@ -244,6 +247,15 @@ async function refreshJengaSeries() {
         <div class="game-score-history-item rank-row">
           <div class="info-label">順位</div>
           現在の妨害順位: ${interferenceRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.success_count}回)`).join(" / ")}
+        </div>
+      `;
+    }
+    const stateRanking = Array.isArray(data.state_ranking) ? data.state_ranking : [];
+    if (data.scoring_mode === "state" && stateRanking.length) {
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">状態管理</div>
+          ノルマ維持: ${stateRanking.map(item => `${item.rank}位 ${item.watch_id} (${(item.quota_keep_ms / 1000).toFixed(1)}秒)`).join(" / ")}
         </div>
       `;
     }
@@ -463,7 +475,7 @@ async function refreshScores() {
       .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
       .map(([watchId, score]) => {
         if (typeof score === "object" && score !== null) {
-          return `<div class="score-item">${watchId}: ${score.total_score || 0}点<br><small>生存 ${score.survival_score || 0} / 妨害 ${score.interference_score || 0} / 順位 ${score.ranking_bonus || 0}</small></div>`;
+          return `<div class="score-item">${watchId}: ${score.total_score || 0}点<br><small>生存 ${score.survival_score || 0} / 妨害 ${score.interference_score || 0} / ボーナス ${score.ranking_bonus || 0}</small></div>`;
         }
         return `<div class="score-item">${watchId}: ${score}点</div>`;
       })
@@ -1349,7 +1361,7 @@ function getAttackScoringLabel(mode) {
   const labels = {
     success: "成功回数: 成功 +1点",
     impact: "影響度: セット首位 +1点",
-    ranking: "累積順位: 最終1位 +2点 / 2位 +1点",
+    state: "状態管理: ノルマ維持時間1位にゲーム終了時 +1点",
     mvp: "MVP: セットMVP +1点"
   };
   return labels[mode] || mode;

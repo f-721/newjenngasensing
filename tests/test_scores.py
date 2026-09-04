@@ -75,13 +75,8 @@ def test_attack_challenge_scoring_variants_use_success_impact_for_ending_turn():
         "watch2": {"turn": "watch1", "success_count": 2, "threshold_duration_ms": 18000, "success_time": 2000},
         "watch3": {"turn": "watch1", "success_count": 2, "threshold_duration_ms": 18000, "success_time": 1000},
         "watch4": {"turn": "watch1", "success_count": 1, "threshold_duration_ms": 5000, "success_time": 0},
-    }, "watch1", "impact") == {
-        "watch3": {"points": 1, "reasons": ["影響度: 成功数・ノルマ維持時間・早さで判定"]},
-    }
-    assert attack_challenge_score_awards(successes, "watch1", "ranking") == {
-        "watch2": {"points": 5, "reasons": ["影響度順位ボーナス 5点"]},
-        "watch3": {"points": 3, "reasons": ["影響度順位ボーナス 3点"]},
-    }
+    }, "watch1", "impact") == {}
+    assert attack_challenge_score_awards(successes, "watch1", "state") == {}
     assert attack_challenge_score_awards(successes, "watch1", "mvp") == {
         "watch2": {"points": 5, "reasons": ["このターンのMVP"]},
     }
@@ -98,6 +93,16 @@ def test_wait_mode_attack_scoring_can_be_updated(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.get_json()["mode"] == "impact"
     assert main.load_attack_scoring()["mode"] == "impact"
+
+
+def test_removed_ranking_mode_is_rejected(monkeypatch, tmp_path):
+    configure_files(monkeypatch, tmp_path)
+    main.save_json_file(main.GAME_STATUS_FILE, {"running": False}, log=False)
+    main.save_json_file(main.CONTROL_FILE, {"mode": "attack_challenge"}, log=False)
+
+    response = main.app.test_client().post("/attack_scoring", json={"mode": "ranking"})
+
+    assert response.status_code == 400
 
 
 def test_attack_scoring_update_is_reflected_in_series_status(monkeypatch, tmp_path):

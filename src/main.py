@@ -12,9 +12,10 @@ from score_logic import (
     ATTACK_SCORING_MODES,
     apply_points,
     attack_challenge_score_awards,
-    apply_ranking_bonus,
+    apply_state_bonus,
     calculate_final_ranking,
     calculate_interference_ranking,
+    calculate_state_ranking,
     calculate_set_score,
     normalize_scores,
     normalize_series_scores,
@@ -234,13 +235,35 @@ def record_attack_success_event(attacker, success):
     event = {
         "attacker": attacker,
         "timestamp": int(time.time() * 1000),
+        "signal_timestamp": success.get("signal_timestamp"),
+        "achievement_time_ms": success.get("achievement_time_ms", 0),
         "impact": success.get("impact", 0),
+        "heart_rate_width": success.get("heart_rate_width", success.get("impact", 0)),
+        "threshold_excess": success.get("threshold_excess", 0),
         "threshold": success.get("threshold"),
         "heartbeat": success.get("heartbeat"),
         "direction": success.get("direction"),
+        "turn": success.get("turn"),
+        "quota_keep_ms": success.get("quota_keep_ms", 0),
+        "quota_error_total": success.get("quota_error_total", 0),
+        "quota_sample_count": success.get("quota_sample_count", 0),
     }
     series["current_set_events"].append(event)
     series["attack_events"].append(event)
+    save_jenga_series(series)
+
+
+def update_attack_state_event(attacker, success):
+    """Persist the latest quota-maintenance totals into the matching series event."""
+    series = load_jenga_series()
+    if not series["active"]:
+        return
+    for events in (series["current_set_events"], series["attack_events"]):
+        for event in reversed(events):
+            if event.get("attacker") == attacker and event.get("turn") == success.get("turn"):
+                for field in ("quota_keep_ms", "quota_error_total", "quota_sample_count"):
+                    event[field] = success.get(field, 0)
+                break
     save_jenga_series(series)
 
 
@@ -277,8 +300,8 @@ def finish_set(collapsed_player):
     series["set_finished"] = True
 
     if series["game_number"] >= series["total_sets"]:
-        if series["scoring_mode"] == "ranking":
-            series["scores"], _ = apply_ranking_bonus(
+        if series["scoring_mode"] == "state":
+            series["scores"], _ = apply_state_bonus(
                 series["scores"], series["attack_events"], series["watch_ids"]
             )
         series["final_ranking"] = calculate_final_ranking(series["scores"], series["watch_ids"])
@@ -677,6 +700,29 @@ def resolve_attack_challenge():
     heartbeats = get_latest_heartbeats()
     success_state = load_attack_success()
     resolved = []
+    state_updated = False
+    sample_timestamp = int(time.time() * 1000)
+
+    # 到達済みの挑戦者は、現在値がノルマの±3 BPMなら維持時間を加算する。
+    for attacker, state in success_state.items():
+        if not isinstance(state, dict) or state.get("turn") != condition.get("turn"):
+            continue
+        heartbeat = heartbeats.get(attacker)
+        try:
+            threshold = float(state.get("threshold"))
+            heartbeat = float(heartbeat)
+            previous_sample = int(state.get("last_state_sample_timestamp", sample_timestamp))
+        except (TypeError, ValueError):
+            continue
+        elapsed_ms = max(0, min(2500, sample_timestamp - previous_sample))
+        error = abs(heartbeat - threshold)
+        state["last_state_sample_timestamp"] = sample_timestamp
+        state["quota_error_total"] = float(state.get("quota_error_total", 0) or 0) + error
+        state["quota_sample_count"] = int(state.get("quota_sample_count", 0) or 0) + 1
+        if error <= 3:
+            state["quota_keep_ms"] = int(state.get("quota_keep_ms", 0) or 0) + elapsed_ms
+        update_attack_state_event(attacker, state)
+        state_updated = True
 
     for attacker, signal in list(pending.items()):
         if signal.get("turn") != condition.get("turn"):
@@ -688,8 +734,14 @@ def resolve_attack_challenge():
 
         success = heartbeat >= threshold if condition["direction"] == "up" else heartbeat <= threshold
         if success:
+            success_timestamp = int(time.time() * 1000)
+            try:
+                signal_timestamp = int(signal.get("timestamp", success_timestamp))
+            except (TypeError, ValueError):
+                signal_timestamp = success_timestamp
             reference_bpm, reference_source = attack_reference(attacker, condition)
-            impact = heartbeat - threshold if condition["direction"] == "up" else threshold - heartbeat
+            threshold_excess = heartbeat - threshold if condition["direction"] == "up" else threshold - heartbeat
+            heart_rate_width = abs(heartbeat - reference_bpm) if reference_bpm is not None else threshold_excess
             active_targets[attacker] = signal["target"]
             del pending[attacker]
             success_state[attacker] = {
@@ -700,7 +752,15 @@ def resolve_attack_challenge():
                 "reference_bpm": reference_bpm,
                 "reference_source": reference_source,
                 "threshold": threshold,
-                "impact": impact,
+                "impact": heart_rate_width,
+                "heart_rate_width": heart_rate_width,
+                "threshold_excess": threshold_excess,
+                "signal_timestamp": signal_timestamp,
+                "achievement_time_ms": max(0, success_timestamp - signal_timestamp),
+                "quota_keep_ms": 0,
+                "quota_error_total": abs(float(heartbeat) - float(threshold)),
+                "quota_sample_count": 1,
+                "last_state_sample_timestamp": success_timestamp,
             }
             record_attack_success_event(attacker, success_state[attacker])
             resolved.append(attacker)
@@ -708,6 +768,7 @@ def resolve_attack_challenge():
     if resolved:
         save_attack_targets(active_targets)
         save_attack_pending(pending)
+    if resolved or state_updated:
         save_attack_success(success_state)
 
     return condition, pending, active_targets, resolved
@@ -832,6 +893,7 @@ def get_jenga_series():
     return jsonify({
         **series,
         "interference_ranking": calculate_interference_ranking(series["attack_events"], series["watch_ids"]),
+        "state_ranking": calculate_state_ranking(series["attack_events"], series["watch_ids"]),
     })
 
 
@@ -916,13 +978,26 @@ def stop_game():
     # ゲーム状態を読み込む
     game_status = load_json_file(GAME_STATUS_FILE)
 
+    series = load_jenga_series()
+    finished_series = None
+    if series["active"] and not series["set_finished"]:
+        resolve_attack_challenge()
+        # 終了ボタンでは倒壊者なしとして、全員に生存点を付けてセット確定する。
+        finished_series = finish_set(None)
+
     # フラグを更新
     game_status["running"] = False
     game_status["game_over"] = True
     save_json_file(GAME_STATUS_FILE, game_status)
 
     print("[API] ゲーム停止しました")
-    return jsonify({"status": "ok", "message": "ゲームを停止しました"})
+    return jsonify({
+        "status": "ok",
+        "message": "ゲームを停止しました",
+        "set_finished": finished_series is not None,
+        "series_complete": bool(finished_series and not finished_series["active"]),
+        "scores": finished_series["scores"] if finished_series else None,
+    })
 
 @app.route('/status', methods=['GET'])
 def get_status():
@@ -1064,6 +1139,7 @@ def record_collapse():
     data = request.get_json(silent=True) or {}
     series = load_jenga_series()
     if series["active"]:
+        resolve_attack_challenge()
         series = finish_set(current_turn)
         game_status["running"] = False
         game_status["game_over"] = not series["active"]
@@ -1480,7 +1556,11 @@ def receive_attack_signal():
         condition["attackers_this_turn"] = sorted(attackers_this_turn)
         save_json_file(ATTACK_CONDITION_FILE, condition, log=False)
         pending = load_attack_pending()
-        pending[attacker] = {"target": target, "turn": condition.get("turn")}
+        pending[attacker] = {
+            "target": target,
+            "turn": condition.get("turn"),
+            "timestamp": int(time.time() * 1000),
+        }
         save_attack_pending(pending)
         save_attack_targets(targets)
         save_attack_round(round_state)
