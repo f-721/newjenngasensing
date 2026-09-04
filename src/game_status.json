@@ -1,5 +1,5 @@
 {
-  "running": false,
+  "running": true,
   "game_over": false,
   "baseline_mode": false
 }
