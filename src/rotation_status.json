@@ -1,1 +1,40 @@
-{}
+{
+  "watch1": {
+    "target_watch": "watch3",
+    "mode": "attack_challenge_wait",
+    "rpm": 30.0,
+    "direction": "c",
+    "extreme": null,
+    "attackers": [
+      "watch3"
+    ],
+    "attack_count": 1,
+    "reference_bpm": 67.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 62.4,
+    "reference_heartbeats": {
+      "watch3": 67.0
+    },
+    "attack_mode": true,
+    "challenge_direction": "down",
+    "pending_attackers": []
+  },
+  "watch3": {
+    "target_watch": "watch1",
+    "mode": "attack_challenge_wait",
+    "rpm": 20.0,
+    "direction": "a",
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0,
+    "reference_bpm": 63.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 63.9,
+    "reference_heartbeats": {
+      "watch1": 63.0
+    },
+    "attack_mode": true,
+    "challenge_direction": "up",
+    "pending_attackers": []
+  }
+}

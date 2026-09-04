@@ -1,6 +1,6 @@
 {
-  "enabled": true,
-  "rpm": 20,
-  "mode": "a",
-  "direction": "a"
+  "enabled": false,
+  "rpm": 10,
+  "mode": "c",
+  "direction": "c"
 }
