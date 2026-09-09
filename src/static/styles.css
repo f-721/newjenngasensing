@@ -874,3 +874,191 @@ select {
   #mode-current { font-size: 1.1rem; }
   .baseline-list > div { font-size: 1rem; min-width: 110px; }
 }
+
+/* Main monitor: give current readings the former maximum/graph area. */
+.heart-display-expanded {
+  flex: 1 0 auto;
+  padding: 20px;
+}
+
+.heart-display-expanded .heart-rate-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.heart-display-expanded #current-used,
+.heart-display-expanded #attack-status {
+  display: block;
+  margin-top: 14px;
+  padding: 16px 20px;
+  font-size: clamp(1.25rem, 1.8vw, 1.6rem);
+  font-weight: 800;
+  line-height: 1.65;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.heart-display-expanded #rate {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 16px;
+  min-height: 320px;
+  max-height: none;
+  overflow: visible;
+  align-items: stretch;
+}
+
+.heart-display-expanded #rate > .current-heart-reading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+  min-width: 0;
+}
+
+.current-heart-device {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.current-heart-value {
+  font-size: clamp(4rem, 8vw, 8rem);
+  line-height: 1.15;
+  color: #d32f2f;
+}
+
+.current-heart-unit {
+  font-size: 1.25rem;
+}
+
+.heart-display-expanded .attack-card:empty { display: none; }
+.heart-display-expanded .attack-card { padding: clamp(12px, 2vw, 24px); }
+.challenge-heading,
+.challenge-player-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.challenge-heading { margin-bottom: 16px; color: #0b3a66; }
+.challenge-heading h3 { margin: 0; font-size: 1.5rem; }
+.challenge-heading > span { font-weight: 700; font-size: 1.1rem; }
+.challenge-players {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 16px;
+}
+.challenge-player { border-radius: 14px; padding: 20px; min-width: 0; }
+.challenge-player-heading > strong { font-size: 1.25rem; overflow-wrap: anywhere; }
+.challenge-goal { margin-top: 20px; display: grid; gap: 8px; color: #123b65; }
+.challenge-goal > span { font-weight: 700; font-size: 1.1rem; }
+.challenge-goal > strong { font-size: clamp(2.75rem, 4vw, 4.5rem); line-height: 1.2; }
+.challenge-goal small { font-size: 1.25rem; white-space: nowrap; }
+.challenge-current { margin-top: 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; color: #243447; }
+.challenge-current > strong { font-size: 2rem; }
+.challenge-current small { font-size: 1rem; }
+.challenge-guidance { margin: 16px 0 12px; padding: 12px; background: #fff; border-radius: 8px; font-size: 1.25rem; font-weight: 800; }
+.challenge-reference { font-size: 0.95rem; color: #4b5563; }
+.challenge-empty { color: #4b5563; padding: 20px; }
+
+.challenge-direction-down { color: #1565c0; }
+.challenge-direction-up { color: #c62828; }
+
+.challenge-goal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.challenge-direction-cue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  margin: 16px 0 0 auto;
+  border-radius: 12px;
+  background: #fff;
+  font-size: clamp(1.4rem, 2vw, 2rem);
+  font-weight: 900;
+}
+
+.challenge-big-arrow {
+  display: block;
+  width: clamp(64px, 7vw, 110px);
+  height: clamp(80px, 9vw, 140px);
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 45%, 70% 45%, 70% 100%, 30% 100%, 30% 45%, 0 45%);
+}
+
+.challenge-direction-down .challenge-big-arrow {
+  transform: rotate(180deg);
+}
+
+.challenge-guidance > strong {
+  font-size: 1.2em;
+  font-weight: 900;
+}
+
+.heart-info-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 14px;
+  align-items: stretch;
+}
+
+.heart-info-status {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.heart-info-status #current-used,
+.heart-info-status #attack-status {
+  margin-top: 0;
+  flex: 1;
+}
+
+.heart-info-average {
+  min-width: 0;
+  padding: 16px 20px;
+}
+
+.heart-info-average h3 {
+  font-size: 1.4rem;
+  margin-bottom: 12px;
+}
+
+.heart-info-average .baseline-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+}
+
+.heart-info-average .baseline-list > div {
+  min-width: 0;
+  padding: 16px;
+  font-size: clamp(1.4rem, 2vw, 2rem);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.heart-info-average .mode-current {
+  margin-top: 12px;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .heart-info-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

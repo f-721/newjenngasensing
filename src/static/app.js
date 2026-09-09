@@ -41,17 +41,31 @@ async function fetchHeartRate() {
     const rateContainer = document.getElementById('rate');
     const maxContainer = document.getElementById('max-rate');
     rateContainer.innerHTML = '';
-    maxContainer.innerHTML = '';
+    if (maxContainer) maxContainer.innerHTML = '';
 
     if (!data || Object.keys(data).length === 0) {
       rateContainer.innerText = 'データがありません';
-      maxContainer.innerText = '最大心拍数を記録できません';
+      if (maxContainer) maxContainer.innerText = '最大心拍数を記録できません';
     } else {
       for (const [device_id, record] of Object.entries(data)) {
         const bpm = record.heartbeat;
         const div = document.createElement('div');
         const bpmText = (bpm !== undefined && bpm !== null) ? `${bpm}` : "--";
-        div.innerText = `心拍数: ${bpmText} bpm (${device_id})`;
+        if (rateContainer.closest('.heart-display-expanded')) {
+          div.className = 'current-heart-reading';
+          const device = document.createElement('span');
+          device.className = 'current-heart-device';
+          device.innerText = device_id;
+          const value = document.createElement('strong');
+          value.className = 'current-heart-value';
+          value.innerText = bpmText;
+          const unit = document.createElement('span');
+          unit.className = 'current-heart-unit';
+          unit.innerText = 'bpm';
+          div.append(device, value, unit);
+        } else {
+          div.innerText = `心拍数: ${bpmText} bpm (${device_id})`;
+        }
         div.style.fontSize = '1.5em';
         div.style.fontWeight = 'bold';
         rateContainer.appendChild(div);
@@ -69,7 +83,7 @@ async function fetchHeartRate() {
         div.innerText = `最大心拍数: ${maxBpm} bpm (${device_id})`;
         div.style.fontSize = '1.5em';
         div.style.fontWeight = 'bold';
-        maxContainer.appendChild(div);
+        if (maxContainer) maxContainer.appendChild(div);
       }
     }
   } catch (error) {
@@ -307,7 +321,8 @@ async function resetServer() {
     const data = await res.json();
     localStorage.removeItem("maxHeartRates");
     document.getElementById('rate').innerHTML = '<p>読み込み中...</p>';
-    document.getElementById('max-rate').innerHTML = '<p>最大心拍数を記録中...</p>';
+    const maxContainer = document.getElementById('max-rate');
+    if (maxContainer) maxContainer.innerHTML = '<p>最大心拍数を記録中...</p>';
     document.getElementById('status').innerText = '状態: 停止';
     await refreshGameStatus();
     await refreshCurrentTurn();
@@ -827,13 +842,18 @@ async function refreshCurrentTarget() {
         bannerEl.innerHTML = '';
       }
 
-      // Build table of participants
+      const expandedChallenge = Boolean(attackDetailsEl.closest('.heart-display-expanded'));
+      const escapeChallengeText = (value) => String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[char]));
+
+      // Build participant readings and goals.
       const rows = participants.map((watchId) => {
         const requirement = requirements[watchId] || {};
         const rawThreshold = requirement.threshold;
         const threshold = rawThreshold == null ? null : Number(rawThreshold);
-        const heartbeat = Number(requirement.heartbeat);
-        const referenceBpm = Number(requirement.reference_bpm);
+        const heartbeat = requirement.heartbeat == null ? NaN : Number(requirement.heartbeat);
+        const referenceBpm = requirement.reference_bpm == null ? NaN : Number(requirement.reference_bpm);
         const referenceLabel = requirement.reference_source === 'turn_start' ? '交代時' : '平均値';
         const status = requirement.status || (activeAttackers.includes(watchId) ? '達成' : '挑戦中');
         const directionKey = attackData.challenge_direction === 'down' ? 'down' : 'up';
@@ -854,6 +874,38 @@ async function refreshCurrentTarget() {
 
         const arrowGlyph = directionKey === 'down' ? '▼' : '▲';
         const arrowClass = directionKey === 'down' ? 'down' : 'up';
+        if (expandedChallenge) {
+          const directionKnown = ['up', 'down'].includes(attackData.challenge_direction);
+          const directionText = directionKey === 'down' ? '下げよう' : '上げよう';
+          const directionClass = directionKnown ? `challenge-direction-${directionKey}` : '';
+          const hasGoal = Number.isFinite(threshold);
+          const hasReading = Number.isFinite(heartbeat);
+          const remaining = hasGoal && hasReading
+            ? Math.max(0, directionKey === 'down' ? heartbeat - threshold : threshold - heartbeat)
+            : null;
+          const goal = hasGoal
+            ? `${directionKey === 'down' ? Math.floor(threshold) : Math.ceil(threshold)} <small>BPM ${directionKey === 'down' ? '以下' : '以上'}</small>`
+            : '未設定';
+          const guidance = status === '達成' ? 'チャレンジ達成！'
+            : remaining === null ? '心拍数・ノルマの取得を待っています'
+            : remaining === 0 ? '目標に到達しています'
+            : `あと ${Math.ceil(remaining)} BPM <strong class="${directionClass}">${directionText}</strong>`;
+          return `<article class="challenge-player ${statusClass}">
+            <div class="challenge-player-heading"><strong>${escapeChallengeText(watchId)}</strong>
+              <span class="attack-status-badge ${statusClass}">${escapeChallengeText(status)}</span></div>
+            <div class="challenge-goal-row">
+              <div class="challenge-goal"><span>目標心拍数（ノルマ）</span><strong>${goal}</strong></div>
+              ${directionKnown ? `<div class="challenge-direction-cue ${directionClass}">
+                <span class="challenge-big-arrow" aria-hidden="true"></span>
+                <strong>${directionText}</strong>
+              </div>` : ''}
+            </div>
+            <div class="challenge-current"><span>現在の心拍数</span><strong>${hasReading ? `${Math.round(heartbeat)} <small>BPM</small>` : '未取得'}</strong></div>
+            <p class="challenge-guidance">${guidance}</p>
+            <div class="challenge-reference">基準（${referenceLabel}）：${Number.isFinite(referenceBpm) ? `${Math.round(referenceBpm)} BPM` : '未設定'}</div>
+          </article>`;
+        }
+
         return `
           <tr>
             <td class="arrow-cell"><span class="attack-arrow small ${arrowClass}">${arrowGlyph}</span></td>
@@ -883,7 +935,10 @@ async function refreshCurrentTarget() {
           </tbody>
         </table>
       `;
-      attackDetailsEl.innerHTML = tableHtml;
+      attackDetailsEl.innerHTML = expandedChallenge
+        ? `<div class="challenge-heading"><h3>妨害チャレンジ</h3><span class="${attackData.challenge_direction === 'down' ? 'challenge-direction-down' : attackData.challenge_direction === 'up' ? 'challenge-direction-up' : ''}">${attackData.challenge_direction === 'down' ? '▼ 心拍数を下げよう' : attackData.challenge_direction === 'up' ? '▲ 心拍数を上げよう' : '条件を設定してください'}</span></div>
+           <div class="challenge-players">${rows || '<p class="challenge-empty">参加者を待っています</p>'}</div>`
+        : tableHtml;
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
@@ -903,6 +958,7 @@ document.addEventListener("visibilitychange", () => {
 let fetchHeartDataIntervalId = null;
 
 function startHeartDataLoop() {
+  if (!document.getElementById("graph-area")) return;
   if (heartDataInterval) return;
   heartDataInterval = setInterval(fetchHeartData, 1000);
 }
@@ -986,7 +1042,7 @@ function createGraph(watchId) {
 }
 
 async function fetchHeartData() {
-  if (!isGameRunning) return;
+  if (!isGameRunning || !document.getElementById("graph-area")) return;
 
   const response = await fetch('/get_heart_data');
   const data = await response.json();
@@ -1008,6 +1064,7 @@ async function fetchHeartData() {
 }
 
 async function setupGraphs() {
+  if (!document.getElementById("graph-area")) return;
   try {
     const res = await fetch('/clients');
     const data = await res.json();
@@ -1039,6 +1096,7 @@ async function setupGraphs() {
 let plotInterval = null;
 
 function startPlotting() {
+  if (!document.getElementById("graph-area")) return;
   if (plotInterval) clearInterval(plotInterval);
 
   plotInterval = setInterval(async () => {

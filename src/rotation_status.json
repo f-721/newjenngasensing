@@ -1,40 +1,62 @@
 {
   "watch1": {
-    "target_watch": "watch3",
-    "mode": "attack_challenge_wait",
-    "rpm": 30.0,
-    "direction": "c",
-    "extreme": null,
-    "attackers": [
-      "watch3"
-    ],
-    "attack_count": 1,
-    "reference_bpm": 67.0,
-    "reference_source": "turn_start",
-    "baseline_bpm": 62.4,
-    "reference_heartbeats": {
-      "watch3": 67.0
-    },
-    "attack_mode": true,
-    "challenge_direction": "down",
-    "pending_attackers": []
-  },
-  "watch3": {
-    "target_watch": "watch1",
-    "mode": "attack_challenge_wait",
+    "target_watch": "watch2",
+    "mode": "attack_challenge",
     "rpm": 20.0,
     "direction": "a",
     "extreme": null,
     "attackers": [],
     "attack_count": 0,
-    "reference_bpm": 63.0,
-    "reference_source": "turn_start",
-    "baseline_bpm": 63.9,
+    "reference_bpm": 75.0,
+    "reference_source": "baseline",
+    "baseline_bpm": 75.0,
     "reference_heartbeats": {
-      "watch1": 63.0
+      "watch2": 75.0
     },
     "attack_mode": true,
-    "challenge_direction": "up",
+    "challenge_direction": "down",
+    "pending_attackers": [
+      "watch2",
+      "watch3",
+      "watch4"
+    ]
+  },
+  "watch2": {
+    "target_watch": "watch3",
+    "mode": "attack_challenge",
+    "rpm": 20.0,
+    "direction": "c",
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0,
+    "reference_bpm": 80.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 75.0,
+    "reference_heartbeats": {
+      "watch3": 80.0
+    },
+    "attack_mode": true,
+    "challenge_direction": "down",
+    "pending_attackers": [
+      "watch1"
+    ]
+  },
+  "watch3": {
+    "target_watch": "watch4",
+    "mode": "attack_challenge",
+    "rpm": 20.0,
+    "direction": "c",
+    "extreme": null,
+    "attackers": [],
+    "attack_count": 0,
+    "reference_bpm": 77.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 77.11111111111111,
+    "reference_heartbeats": {
+      "watch4": 77.0
+    },
+    "attack_mode": true,
+    "challenge_direction": "down",
     "pending_attackers": []
   }
 }

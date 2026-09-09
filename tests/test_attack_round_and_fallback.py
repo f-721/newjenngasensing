@@ -73,7 +73,8 @@ class AttackRoundAndFallbackTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         state = main.load_attack_round()
         self.assertEqual(state.get("used_attackers"), ["watch2"])
-        self.assertEqual(state.get("last_turn"), "watch1")
+        self.assertEqual(state.get("last_turn"), "watch2")
+        self.assertEqual(state.get("seen_turns"), ["watch1", "watch2"])
 
     def test_no_attack_fallback_rotation_is_fixed(self):
         motor_controller.no_attack_fallback_until = 0.0

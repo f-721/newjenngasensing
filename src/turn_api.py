@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, current_app
 import json
 import os
 import threading
@@ -111,7 +111,12 @@ def next_turn():
     next_id = all_ids[next_index]
     if current != next_id:
         award_turn_scores(current)
+    update_attack_round = current_app.extensions.get("update_attack_round_for_turn")
+    if update_attack_round:
+        update_attack_round(current, set(all_ids))
     save_current_turn(next_id, advance=True)
+    if update_attack_round:
+        update_attack_round(next_id, set(all_ids))
 
     print()
     print("=== [ターン進行] ===")

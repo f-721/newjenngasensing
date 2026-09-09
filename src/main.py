@@ -506,7 +506,7 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
     seen_turns = set(round_state.get("seen_turns", []))
     completed = bool(round_state.get("completed"))
 
-    if current_turn == previous_turn:
+    if current_turn not in assigned_watches or current_turn == previous_turn:
         return round_state
 
     if completed:
@@ -514,7 +514,7 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
             "used_attackers": [],
             "seen_turns": [current_turn],
             "last_turn": current_turn,
-            "completed": False,
+            "completed": assigned_watches == {current_turn},
         }
         # 一周後は再妨害を許可するが、次ターンのノルマ計算に必要な
         # previous_direction は消さない。
@@ -532,6 +532,10 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
     }
     save_attack_round(round_state)
     return round_state
+
+
+# The turn blueprint advances the same cycle without waiting for status polling.
+app.extensions["update_attack_round_for_turn"] = update_attack_round_for_turn
 
 
 def load_attack_pending():
@@ -625,7 +629,10 @@ def get_attack_challenge_condition():
         return condition
 
     if isinstance(condition, dict) and condition.get("turn") and condition.get("turn") != current_turn:
-        reset_attack_cycle_state(reset_condition=False)
+        # Clear per-turn results, retaining attack usage until the full cycle ends.
+        save_attack_targets({})
+        save_attack_pending({})
+        save_attack_success({})
 
     previous_direction = condition.get("direction") if isinstance(condition, dict) else None
     experienced_attackers = set(condition.get("experienced_attackers", []))
@@ -867,6 +874,7 @@ def start_game():
         "current_turn": ids[0] if ids else None,
         "turn_number": 1 if ids else 0,
     })
+    update_attack_round_for_turn(ids[0], set(ids))
     if request.args.get("mode") == "jenga":
         try:
             total_sets = max(1, int(request.args.get("sets", 3)))
@@ -953,6 +961,7 @@ def next_jenga_game():
     reset_attack_cycle_state()
     save_json_file(ROTATION_STATUS_FILE, {}, log=False)
     save_json_file(TURN_FILE, {"current_turn": assigned_ids[0], "turn_number": 1}, log=False)
+    update_attack_round_for_turn(assigned_ids[0], set(assigned_ids))
     status.update({"running": True, "game_over": False, "baseline_mode": False})
     save_json_file(GAME_STATUS_FILE, status, log=False)
 
@@ -1100,6 +1109,7 @@ def set_turn():
         return jsonify({"status": "error", "message": "指定されたIDが存在しません"}), 400
     turn_state = load_json_file(TURN_FILE)
     turn_number = turn_state.get("turn_number", 0)
+    update_attack_round_for_turn(turn_state.get("current_turn"), set(assigned_ids.values()))
     if turn_state.get("current_turn") != new_turn:
         current_turn = turn_state.get("current_turn")
         if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
@@ -1111,6 +1121,7 @@ def set_turn():
         "current_turn": new_turn,
         "turn_number": turn_number,
     })
+    update_attack_round_for_turn(new_turn, set(assigned_ids.values()))
     print(f"[API] 管理者操作: ターンを {new_turn} に設定しました")
     return jsonify({"status": "ok", "message": f"{new_turn} に設定しました"})
 

@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <title>心拍数モニター</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="dashboard">
@@ -27,41 +26,27 @@
       </div>
     </div>
 
-    <div class="challenge-rule-card">
-      <div class="challenge-info-title">妨害チャレンジのルール</div>
-      <ul>
-        <li><strong>ゲーム開始時</strong>: 20 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
-        <li><strong>妨害信号到達後 1人成功</strong>: 30 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
-        <li><strong>妨害信号到達後 2人成功</strong>: 40 RPM で回転し、3 秒間隔で回転方向が逆転する</li>
-        <li><strong>妨害信号到達後 3人成功</strong>: 30 と 40 RPM をランダムに切り替え、1 秒間隔で 50% の確率で回転方向が変化する</li>
-      </ul>
-    </div>
-
     <div class="compact-grid">
-      <div class="card heart-display-card">
+      <div class="card heart-display-card heart-display-expanded">
         <h3>現在の心拍数</h3>
         <div class="heart-rate-panel">
           <div class="heart-rate-box">
-            <h4>現在の心拍数</h4>
             <div id="rate"><p>読み込み中...</p></div>
-            <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
-            <div id="attack-status" class="current-used">妨害情報: 取得中...</div>
+            <div class="heart-info-layout">
+              <div class="heart-info-status">
+                <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
+                <div id="attack-status" class="current-used">妨害情報: 取得中...</div>
+              </div>
+              <section class="card status-summary-card heart-info-average" aria-labelledby="average-heading">
+                <h3 id="average-heading">平均心拍数</h3>
+                <div id="baseline-area" class="baseline-list"></div>
+                <div id="mode-current" class="mode-current">現在の設定：未設定</div>
+              </section>
+            </div>
             <div id="attack-details" class="attack-card" aria-live="polite"></div>
           </div>
-          <div class="heart-rate-box">
-            <h4>最大心拍数</h4>
-            <div id="max-rate"><p>最大心拍数を記録中...</p></div>
-            <div id="comparison-reference" class="comparison-reference">比較の参考心拍: 未設定</div>
-          </div>
         </div>
-      </div>
-
-      
-
-      <div class="card">
-        <h2>心拍数グラフ</h2>
-        <div id="graph-area" class="graph-container"></div>
-        <div class="graph-links" style="margin-top:6px; display:flex; justify-content:center;">
+        <div class="graph-links" style="margin-top:12px; text-align:center;">
           <a href="/static/settings.html" class="mini-link-btn" style="padding:12px 18px; font-weight:700;">設定画面を開く</a>
         </div>
         <!-- Hidden placeholders so app.js can safely query moved controls -->
@@ -84,12 +69,6 @@
         </div>
       </div>
 
-      <div class="card status-summary-card">
-        <h3>現在のゲーム設定と平均値</h3>
-        <div id="mode-current" class="mode-current">現在の設定：未設定</div>
-        <div id="baseline-area" class="baseline-list" style="margin-top:8px;"></div>
-      </div>
-      </div>
     </div>
   </div>
 
