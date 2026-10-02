@@ -1,9 +1,9 @@
 {
   "series_id": "20261002_175856",
-  "game_number": 1,
+  "game_number": 2,
   "total_sets": 3,
   "active": true,
-  "set_finished": false,
+  "set_finished": true,
   "scoring_mode": "success",
   "watch_ids": [
     "watch1",
@@ -11,21 +11,320 @@
   ],
   "scores": {
     "watch1": {
-      "survival_score": 0,
+      "survival_score": 1,
       "interference_score": 0,
       "ranking_bonus": 0,
-      "total_score": 0
+      "total_score": 1
     },
     "watch2": {
-      "survival_score": 0,
+      "survival_score": 2,
       "interference_score": 0,
       "ranking_bonus": 0,
-      "total_score": 0
+      "total_score": 2
     }
   },
-  "set_history": [],
+  "set_history": [
+    {
+      "set": 1,
+      "collapsed_player": null,
+      "survivors": [
+        "watch1",
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        },
+        "watch2": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        }
+      },
+      "attack_metrics": {
+        "watch1": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        },
+        "watch2": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        }
+      },
+      "impact_winner": null
+    },
+    {
+      "set": 2,
+      "collapsed_player": "watch1",
+      "survivors": [
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 0,
+          "interference": 0,
+          "ranking": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        },
+        "watch2": {
+          "survival_score": 2,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 2
+        }
+      },
+      "attack_metrics": {
+        "watch1": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        },
+        "watch2": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        }
+      },
+      "impact_winner": null
+    }
+  ],
   "current_set_events": [],
   "attack_events": [],
   "final_ranking": [],
-  "last_set_result": {}
+  "score_history": [
+    {
+      "set": 1,
+      "collapsed_player": null,
+      "survivors": [
+        "watch1",
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        },
+        "watch2": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        }
+      },
+      "attack_metrics": {
+        "watch1": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        },
+        "watch2": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        }
+      },
+      "impact_winner": null
+    },
+    {
+      "set": 2,
+      "collapsed_player": "watch1",
+      "survivors": [
+        "watch2"
+      ],
+      "interference_success": {
+        "watch1": 0,
+        "watch2": 0
+      },
+      "mvp": null,
+      "set_points": {
+        "watch1": {
+          "survival": 0,
+          "interference": 0,
+          "ranking": 0
+        },
+        "watch2": {
+          "survival": 1,
+          "interference": 0,
+          "ranking": 0
+        }
+      },
+      "scores": {
+        "watch1": {
+          "survival_score": 1,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 1
+        },
+        "watch2": {
+          "survival_score": 2,
+          "interference_score": 0,
+          "ranking_bonus": 0,
+          "total_score": 2
+        }
+      },
+      "attack_metrics": {
+        "watch1": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        },
+        "watch2": {
+          "success_count": 0,
+          "quota_keep_ms": 0,
+          "average_quota_error": null,
+          "total_impact": 0,
+          "max_impact": 0,
+          "average_achievement_ms": null,
+          "events": []
+        }
+      },
+      "impact_winner": null
+    }
+  ],
+  "last_set_result": {
+    "set": 2,
+    "collapsed_player": "watch1",
+    "survivors": [
+      "watch2"
+    ],
+    "interference_success": {
+      "watch1": 0,
+      "watch2": 0
+    },
+    "mvp": null,
+    "set_points": {
+      "watch1": {
+        "survival": 0,
+        "interference": 0,
+        "ranking": 0
+      },
+      "watch2": {
+        "survival": 1,
+        "interference": 0,
+        "ranking": 0
+      }
+    },
+    "scores": {
+      "watch1": {
+        "survival_score": 1,
+        "interference_score": 0,
+        "ranking_bonus": 0,
+        "total_score": 1
+      },
+      "watch2": {
+        "survival_score": 2,
+        "interference_score": 0,
+        "ranking_bonus": 0,
+        "total_score": 2
+      }
+    },
+    "attack_metrics": {
+      "watch1": {
+        "success_count": 0,
+        "quota_keep_ms": 0,
+        "average_quota_error": null,
+        "total_impact": 0,
+        "max_impact": 0,
+        "average_achievement_ms": null,
+        "events": []
+      },
+      "watch2": {
+        "success_count": 0,
+        "quota_keep_ms": 0,
+        "average_quota_error": null,
+        "total_impact": 0,
+        "max_impact": 0,
+        "average_achievement_ms": null,
+        "events": []
+      }
+    },
+    "impact_winner": null
+  }
 }

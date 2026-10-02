@@ -582,6 +582,21 @@ select {
 
 .result-rank small { font-size: 18px; margin-left: 4px; }
 .result-player-name { white-space: nowrap; }
+.result-watch-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.result-watch-prefix { font-size: 14px; color: #31445c; }
+.result-watch-number {
+  font-size: 36px;
+  font-weight: 900;
+  line-height: 1;
+  color: #14263d;
+  font-variant-numeric: tabular-nums;
+}
 .result-value { font-size: 22px; white-space: nowrap; }
 .result-detail { margin-bottom: 8px; white-space: nowrap; }
 .result-set-score {

@@ -223,7 +223,11 @@ function renderSetStatus() {
 
 function updateAttackScoringVisibility() {
   const controls = document.getElementById("attackScoringControls");
-  if (controls) controls.style.display = attackChallengeModes.has(currentControlMode) ? "block" : "none";
+  const isAttackChallenge = attackChallengeModes.has(currentControlMode);
+  if (controls) controls.style.display = isAttackChallenge ? "block" : "none";
+  document.querySelectorAll(".interference-ranking").forEach(card => {
+    card.hidden = !isAttackChallenge;
+  });
 }
 
 function updateSetScoreDisplay(mode = null) {
@@ -237,16 +241,41 @@ function escapeResultText(value) {
   }[char]));
 }
 
-function renderRankingCard(title, ranking, metric, final = false) {
-  return `<section class="game-score-history-item rank-row${final ? ' final-ranking' : ''}">
+function renderResultWatchLabel(watchId) {
+  const match = String(watchId).match(/^watch(\d+)$/i);
+  if (!match) return escapeResultText(watchId);
+  return `<span class="result-watch-label"><span class="result-watch-prefix">watch</span><strong class="result-watch-number">${match[1]}</strong></span>`;
+}
+
+function renderRankingCard(title, ranking, metric, final = false, interference = false) {
+  return `<section class="game-score-history-item rank-row${final ? ' final-ranking' : ''}${interference ? ' interference-ranking' : ''}">
     <h3 class="result-heading">${title}</h3>
     <ol class="result-ranking-list">${ranking.map(item => `
       <li class="result-player-row${Number(item.rank) === 1 ? ' first-place' : ''}">
         <span class="result-rank">${escapeResultText(item.rank)}<small>位</small></span>
-        <span class="result-player-name">${escapeResultText(item.watch_id)}</span>
+        <span class="result-player-name">${renderResultWatchLabel(item.watch_id)}</span>
         <strong class="result-value">${escapeResultText(metric(item))}</strong>
       </li>`).join('')}</ol>
   </section>`;
+}
+
+function getCurrentOverallRanking(data) {
+  const watches = Array.isArray(data.watch_ids) ? data.watch_ids : [];
+  return watches.map(watchId => {
+    const score = (data.scores || {})[watchId] || {};
+    const survival = Number(score.survival_score) || 0;
+    const interference = Number(score.interference_score) || 0;
+    return {
+      watch_id: watchId,
+      survival_score: survival,
+      interference_score: interference,
+      total_score: survival + interference + (Number(score.ranking_bonus) || 0)
+    };
+  }).sort((a, b) => b.total_score - a.total_score
+    || b.survival_score - a.survival_score
+    || b.interference_score - a.interference_score
+    || (a.watch_id < b.watch_id ? -1 : a.watch_id > b.watch_id ? 1 : 0))
+    .map((item, index) => ({ ...item, rank: index + 1 }));
 }
 
 async function refreshJengaSeries() {
@@ -265,7 +294,7 @@ async function refreshJengaSeries() {
     const setCards = scoreHistory.map(result => {
       const scores = Object.entries(result.scores || {})
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([watchId, score]) => `<li class="result-set-score"><span class="result-player-name">${escapeResultText(watchId)}</span><strong class="result-value">${escapeResultText(score.total_score || 0)}点</strong></li>`)
+        .map(([watchId, score]) => `<li class="result-set-score"><span class="result-player-name">${renderResultWatchLabel(watchId)}</span><strong class="result-value">${escapeResultText(score.total_score || 0)}点</strong></li>`)
         .join("");
       const collapsedPlayer = result.collapsed_player || "なし（終了ボタン）";
       return `<section class="game-score-history-item set-row">
@@ -277,9 +306,12 @@ async function refreshJengaSeries() {
     const interferenceRanking = Array.isArray(data.interference_ranking) ? data.interference_ranking : [];
     const stateRanking = Array.isArray(data.state_ranking) ? data.state_ranking : [];
     const finalRanking = Array.isArray(data.final_ranking) ? data.final_ranking : [];
+    const currentRanking = getCurrentOverallRanking(data);
     history.innerHTML = [
       finalRanking.length ? renderRankingCard("最終総合順位", finalRanking, item => `${item.total_score}点`, true) : '',
-      interferenceRanking.length ? renderRankingCard("現在の妨害順位", interferenceRanking, item => `${item.success_count}回`) : '',
+      !finalRanking.length && data.active && currentRanking.length
+        ? renderRankingCard("現在の総合順位（暫定）", currentRanking, item => `${item.total_score}点`) : '',
+      attackChallengeModes.has(currentControlMode) && interferenceRanking.length ? renderRankingCard("現在の妨害順位", interferenceRanking, item => `${item.success_count}回`, false, true) : '',
       data.scoring_mode === "state" && stateRanking.length
         ? renderRankingCard("ノルマ維持順位", stateRanking, item => `${(item.quota_keep_ms / 1000).toFixed(1)}秒`) : '',
       setCards
@@ -492,9 +524,9 @@ async function refreshScores() {
       .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
       .map(([watchId, score]) => {
         if (typeof score === "object" && score !== null) {
-          return `<div class="score-item">${watchId}: ${score.total_score || 0}点<br><small>生存 ${score.survival_score || 0} / 妨害 ${score.interference_score || 0} / ボーナス ${score.ranking_bonus || 0}</small></div>`;
+          return `<div class="score-item">${renderResultWatchLabel(watchId)}: ${score.total_score || 0}点<br><small>生存 ${score.survival_score || 0} / 妨害 ${score.interference_score || 0} / ボーナス ${score.ranking_bonus || 0}</small></div>`;
         }
-        return `<div class="score-item">${watchId}: ${score}点</div>`;
+        return `<div class="score-item">${renderResultWatchLabel(watchId)}: ${score}点</div>`;
       })
       .join('');
   } catch (error) {
