@@ -106,7 +106,6 @@ STATUS_API_URL = f'{API_HOST}/status'
 TURN_API_URL = f'{API_HOST}/turn'
 BASELINE_API_URL = f'{API_HOST}/get_baselines'   # ★追加
 ATTACK_STATUS_API_URL = f'{API_HOST}/attack_status'
-COOP_STATUS_API_URL = f'{API_HOST}/coop_status'
 ROTATION_SETTINGS_API_URL = f'{API_HOST}/get_rotation_settings'
 REQUEST_TIMEOUT = 5
 
@@ -186,12 +185,6 @@ attack_one_current_rpm = None
 attack_one_target_rpm = None
 attack_one_last_change = 0.0
 attack_one_lock = threading.Lock()
-
-# 2対2協力モードは、サポート成功後に40→30→20→10 RPMと2秒ごとに減速する。
-coop_current_rpm = 40
-coop_last_change = 0.0
-coop_last_turn = None
-coop_rpm_lock = threading.Lock()
 
 # 前回取得に成功した心拍データのキャッシュ（APIタイムアウト時に利用）
 last_heart_data = {}
@@ -607,16 +600,6 @@ def get_attack_status(current_turn):
         return {}
 
 
-def get_coop_status():
-    try:
-        response = requests.get(COOP_STATUS_API_URL, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        data = response.json()
-        return data if isinstance(data, dict) else {}
-    except (requests.RequestException, ValueError):
-        return {}
-
-
 def get_attackers(current_turn):
     data = get_attack_status(current_turn)
     return [attacker for attacker in data.get("attackers", []) if isinstance(attacker, str)]
@@ -936,38 +919,6 @@ def data_fetch_loop():
             with turn_start_heartbeats_lock:
                 turn_references = dict(turn_start_heartbeats)
 
-            if mode == "team_coop":
-                global coop_current_rpm, coop_last_change, coop_last_turn
-                coop = get_coop_status()
-                turn_state = coop.get("turn_state", {})
-                if turn_state.get("current_turn") != current_turn:
-                    time.sleep(1)
-                    continue
-                target_watch = turn_state.get("supporter")
-                with coop_rpm_lock:
-                    now = time.monotonic()
-                    if coop_last_turn != current_turn or not turn_state.get("success"):
-                        coop_current_rpm = 40
-                        coop_last_change = now
-                        coop_last_turn = current_turn
-                    elif coop_current_rpm > 10 and now - coop_last_change >= 2.0:
-                        coop_current_rpm = max(10, coop_current_rpm - 10)
-                        coop_last_change = now
-                    rpm = coop_current_rpm
-                direction = turn_state.get("direction", "coop_random")
-                with rotation_settings_lock:
-                    rotation_settings.clear()
-                    rotation_settings[current_turn] = (rpm, direction, False)
-                publish_rotation_status(
-                    current_turn, target_watch, mode, rpm, direction,
-                    reference_bpm=turn_state.get("threshold"), reference_source="coop_quota",
-                    baseline_bpm=baseline_references.get(target_watch),
-                    attack_context={"attack_mode": False, "attack_count": 0},
-                )
-                print(f"[COOP] turn={current_turn} supporter={target_watch} success={turn_state.get('success')} rpm={rpm} dir={direction}")
-                time.sleep(1)
-                continue
-
             comparison_references, comparison_source = get_comparison_references(
                 use_baseline_reference,
                 baseline_references,
@@ -1200,11 +1151,6 @@ def rotation_loop():
                     effective_direction = get_interval_random_direction(
                         ("rotation", device_id),
                         3.0,
-                    )
-                elif mode_or_direction == "coop_random":
-                    effective_direction = get_interval_random_direction(
-                        ("coop_rotation", device_id),
-                        1.0,
                     )
                 # 使用するrpmは段階遷移後の new_rpm
                 target_step_delay = step_delay_for_direction(effective_direction, new_rpm)

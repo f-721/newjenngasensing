@@ -26,7 +26,7 @@ from score_logic import (
 
 from heart_api import heart_api
 from turn_api import turn_api
-from id_api import id_api, registration_lock
+from id_api import id_api
 from flask import send_file, jsonify
 from datetime import datetime, timedelta
 
@@ -46,9 +46,8 @@ def disable_settings_cache(response):
     return response
 
 clients = {}
+id_counter = 1
 file_lock = threading.Lock()
-watch_assignment_lock = registration_lock
-MAX_WATCHES = 4
 DATA_FILE = 'heart_rates.json'
 GAME_STATUS_FILE = 'game_status.json'
 TURN_FILE = 'turn.json'
@@ -206,34 +205,6 @@ def load_json_file(filename):
                 print(f"[WARN] Invalid JSON file: {filename}")
                 return {}
         return {}
-
-
-def assign_watch_id(ip):
-    """Assign the lowest available watch ID, preserving an existing valid IP mapping."""
-    with watch_assignment_lock:
-        assigned_ids = load_json_file(ASSIGNED_FILE)
-        existing_id = assigned_ids.get(ip)
-        occupied_ids = {
-            watch_id for other_ip, watch_id in assigned_ids.items()
-            if other_ip != ip
-        }
-        valid_ids = {f"watch{number}" for number in range(1, MAX_WATCHES + 1)}
-
-        if existing_id in valid_ids and existing_id not in occupied_ids:
-            device_id = existing_id
-        else:
-            device_id = next(
-                (f"watch{number}" for number in range(1, MAX_WATCHES + 1)
-                 if f"watch{number}" not in occupied_ids),
-                None,
-            )
-            if device_id is None:
-                return None
-            assigned_ids[ip] = device_id
-            save_json_file(ASSIGNED_FILE, assigned_ids, log=False)
-
-        clients[ip] = device_id
-        return device_id
 
 
 def load_rotation_settings():
@@ -1056,31 +1027,6 @@ def coop_settings():
     return jsonify({"status": "ok", "settings": settings, "teams": state["teams"]})
 
 
-@app.route('/select_coop_mode', methods=['POST'])
-def select_coop_mode():
-    """Atomically save team settings and select the 2-vs-2 cooperative mode."""
-    if load_json_file(GAME_STATUS_FILE).get("running", False):
-        return jsonify({"status": "error", "message": "ゲーム中は協力モードへ変更できません"}), 409
-    watches = set(load_json_file(ASSIGNED_FILE).values())
-    if len(watches) != 4:
-        return jsonify({"status": "error", "message": f"2対2協力モードにはWatchが4台必要です（現在{len(watches)}台）"}), 400
-    data = request.get_json(silent=True) or {}
-    assignment_mode = data.get("assignment_mode", "specified")
-    pairing = data.get("pairing", "12_34")
-    if assignment_mode not in {"specified", "random"} or pairing not in {"12_34", "13_24", "14_23"}:
-        return jsonify({"status": "error", "message": "チーム設定が不正です"}), 400
-    settings = {**COOP_DEFAULTS, "assignment_mode": assignment_mode, "pairing": pairing}
-    state = load_coop_state()
-    state["settings"] = settings
-    state["teams"] = coop_pairing(watches, assignment_mode, pairing)
-    save_coop_state(state)
-    save_json_file(CONTROL_FILE, {"mode": "team_coop"}, log=False)
-    return jsonify({
-        "status": "ok", "mode": "team_coop", "settings": settings,
-        "teams": state["teams"], "message": "2対2協力モードに変更しました",
-    })
-
-
 @app.route('/coop_status')
 def coop_status():
     state = load_coop_state()
@@ -1219,9 +1165,7 @@ def get_game_status():
 
 @app.route('/reset', methods=['POST'])
 def reset_server():
-    with watch_assignment_lock:
-        save_json_file(ASSIGNED_FILE, {})
-        clients.clear()
+    global id_counter, clients
 
     save_json_file(DATA_FILE, {})
     save_json_file(CSV_HISTORY_FILE, [], log=False)
@@ -1231,6 +1175,7 @@ def reset_server():
         "baseline_mode": False
     })
     save_json_file(TURN_FILE, {"current_turn": None, "turn_number": 0})
+    save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(SCORES_FILE, {}, log=False)
     save_json_file(ATTACK_SCORING_FILE, {"mode": "success"}, log=False)
@@ -1239,6 +1184,9 @@ def reset_server():
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
+
+    clients = {}
+    id_counter = 1
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -1267,10 +1215,19 @@ def reset_game_only():
 
 @app.route("/assign_id")
 def assign_id():
+    global id_counter
     ip = request.remote_addr
-    device_id = assign_watch_id(ip)
-    if device_id is None:
-        return jsonify({"status": "error", "message": "接続できるWatchは4台までです"}), 403
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    if ip in assigned_ids:
+        device_id = assigned_ids[ip]
+    else:
+        existing_ids = set(assigned_ids.values())
+        while f"watch{id_counter}" in existing_ids:
+            id_counter += 1
+        device_id = f"watch{id_counter}"
+        assigned_ids[ip] = device_id
+        save_json_file(ASSIGNED_FILE, assigned_ids)
+    clients[ip] = device_id
     return jsonify({"device_id": device_id})
 
 @app.route("/clients")
@@ -1408,16 +1365,23 @@ def record_collapse():
 
 @app.route('/reconnect', methods=['POST'])
 def reconnect():
-    data = request.get_json(silent=True) or {}
-    requested_id = data.get("reconnect_id")
+    data = request.get_json()
+    reconnect_id = data.get("reconnect_id")
     ip = request.remote_addr
-    if not requested_id:
+    if not reconnect_id:
         return jsonify({"status": "error", "message": "IDが指定されていません"}), 400
-    device_id = assign_watch_id(ip)
-    if device_id is None:
-        return jsonify({"status": "error", "message": "接続できるWatchは4台までです"}), 403
-    print(f"[API] 再接続: IP {ip} に {device_id} を割り当てました")
-    return jsonify({"status": "ok", "message": f"{device_id} を再登録しました", "device_id": device_id})
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    existing_ids = set(assigned_ids.values())
+    if reconnect_id in existing_ids and assigned_ids.get(ip) != reconnect_id:
+        id_num = 1
+        while f"watch{id_num}" in existing_ids:
+            id_num += 1
+        reconnect_id = f"watch{id_num}"
+    clients[ip] = reconnect_id
+    assigned_ids[ip] = reconnect_id
+    save_json_file(ASSIGNED_FILE, assigned_ids)
+    print(f"[API] 再接続: IP {ip} に {reconnect_id} を割り当てました")
+    return jsonify({"status": "ok", "message": f"{reconnect_id} を再登録しました", "device_id": reconnect_id})
 
 @app.route('/export_csv')
 def export_csv():

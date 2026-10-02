@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>設定（ゲーム設定 と モーター制御）</title>
-  <link rel="stylesheet" href="/static/styles.css?v=horizontal-results-2">
+  <link rel="stylesheet" href="/static/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -56,10 +56,10 @@
           <button onclick="startGame()">開始</button>
           <label for="jengaSetCount">セット数</label>
           <select id="jengaSetCount" onchange="setJengaSetCount()">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3" selected>3</option>
-            <option value="5">5</option>
+            <option value="1">ゲーム数：1</option>
+            <option value="2">ゲーム数：2</option>
+            <option value="3" selected>ゲーム数：3</option>
+            <option value="5">ゲーム数：5</option>
           </select>
           <button class="stop-button" onclick="stopGame()">終了</button>
           <button id="nextGameBtn" onclick="nextJengaGame()" style="background-color:#ff9800;">次のゲームへ</button>
@@ -102,23 +102,6 @@
       <!-- モーター制御（元のまま） -->
       <div class="card mode-card">
         <h3>モーター制御モード</h3>
-
-        <div class="mode-group coop-game-selector">
-          <div class="mode-group-title">協力型ゲーム</div>
-          <button class="mode-btn self-btn" onclick="selectCoopGame()">2対2協力モード</button>
-          <div class="mode-note">味方がノルマに到達すると40→30→20→10 RPMへ減速</div>
-          <label class="mode-note" for="coopAssignmentMode">チーム編成</label>
-          <select id="coopAssignmentMode" class="attack-scoring-select" onchange="updateCoopPairingVisibility()">
-            <option value="specified">チームを指定</option>
-            <option value="random">ランダム編成</option>
-          </select>
-          <select id="coopPairing" class="attack-scoring-select">
-            <option value="12_34">チームA: watch1・watch2 / チームB: watch3・watch4</option>
-            <option value="13_24">チームA: watch1・watch3 / チームB: watch2・watch4</option>
-            <option value="14_23">チームA: watch1・watch4 / チームB: watch2・watch3</option>
-          </select>
-          <div id="coopSettingsStatus" class="mode-note" aria-live="polite"></div>
-        </div>
 
         <div class="mode-row self-other-row">
           <div class="mode-group self-group compact-mode-group">
@@ -167,23 +150,22 @@
               </ul>
             </div>
             <div class="challenge-rule-box">
+              <div class="challenge-info-title">妨害チャレンジのルール</div>
+              <ul>
+                <li><strong>ゲーム開始時</strong>: 20 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
+                <li><strong>妨害信号到達後 1人成功</strong>: 30 RPM で回転し、5 秒間隔で回転方向が逆転する</li>
+                <li><strong>妨害信号到達後 2人成功</strong>: 40 RPM で回転し、3 秒間隔で回転方向が逆転する</li>
+                <li><strong>妨害信号到達後 3人成功</strong>: 30 と 40 RPM をランダムに切り替え、1 秒間隔で 50% の確率で回転方向が変化する</li>
+              </ul>
+            </div>
+            <div class="challenge-rule-box">
               <strong>待ち時間あり妨害チャレンジ</strong>
               <ul>
                 <li>管理画面でターンごとの待機カウントダウンを行う</li>
-                <li>メイン画面はルールのみを表示し、細かい待機説明は管理側に集約する</li>
+                <li>ルールと待機説明は管理画面で確認する</li>
                 <li>カウントダウン内の「次のターンまで」は表示しない</li>
               </ul>
             </div>
-          </div>
-
-          <div class="challenge-info-panel">
-            <div class="challenge-info-title">2対2協力モード</div>
-            <ul>
-              <li>各ターンは40 RPM・ランダム方向で開始</li>
-              <li>味方が「平均心拍 +10 BPM」のノルマへ到達すると10 RPMまで減速</li>
-              <li>協力モード中は妨害ボタン無効</li>
-              <li>倒壊しなかったチームへ +1 点</li>
-            </ul>
           </div>
 
           <div class="mode-group compact-rotation">
@@ -246,7 +228,6 @@
   </div>
 
   <a href="/" class="mini-link-btn">ダッシュボードに戻る</a>
-  <script src="/static/app.js?v=horizontal-results-2"></script>
-  <script src="/static/coop.js?v=1"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

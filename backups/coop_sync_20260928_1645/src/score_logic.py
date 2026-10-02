@@ -149,44 +149,6 @@ def calculate_state_ranking(attack_events, watch_ids):
     } for index, watch_id in enumerate(ordered)]
 
 
-def calculate_attack_metrics(attack_events, watch_ids):
-    """Return transparent per-watch state and impact metrics for one event group."""
-    events = successful_attack_events(attack_events, watch_ids)
-    grouped = {watch_id: [] for watch_id in watch_ids}
-    for event in events:
-        grouped[event["attacker"]].append(event)
-
-    metrics = {}
-    for watch_id in watch_ids:
-        watch_events = grouped[watch_id]
-        sample_count = sum(event_quota_sample_count(event) for event in watch_events)
-        error_total = sum(event_quota_error_total(event) for event in watch_events)
-        impacts = [event_impact(event) for event in watch_events]
-        achievement_times = [event_achievement_time_ms(event) for event in watch_events]
-        metrics[watch_id] = {
-            "success_count": len(watch_events),
-            "quota_keep_ms": int(sum(event_quota_keep_ms(event) for event in watch_events)),
-            "average_quota_error": error_total / sample_count if sample_count else None,
-            "total_impact": sum(impacts),
-            "max_impact": max(impacts, default=0),
-            "average_achievement_ms": (
-                sum(achievement_times) / len(achievement_times) if achievement_times else None
-            ),
-            "events": [{
-                "target": event.get("target"),
-                "turn": event.get("turn"),
-                "direction": event.get("direction"),
-                "threshold": event.get("threshold"),
-                "heartbeat": event.get("heartbeat"),
-                "heart_rate_width": event_impact(event),
-                "threshold_excess": event.get("threshold_excess", 0),
-                "achievement_time_ms": event_achievement_time_ms(event),
-                "quota_keep_ms": int(event_quota_keep_ms(event)),
-            } for event in watch_events],
-        }
-    return metrics
-
-
 def apply_state_bonus(scores, attack_events, watch_ids):
     """Award +1 to the single player who kept closest to quota for longest."""
     updated = normalize_series_scores(scores, watch_ids)

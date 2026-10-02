@@ -4,7 +4,6 @@ const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
 const MAX_POINTS = 30;
 
 let heartDataInterval = null;
-let coopTeamByWatch = {};
 
 function startFetching() {
   if (intervalId !== null) return;
@@ -54,8 +53,6 @@ async function fetchHeartRate() {
         const bpmText = (bpm !== undefined && bpm !== null) ? `${bpm}` : "--";
         if (rateContainer.closest('.heart-display-expanded')) {
           div.className = 'current-heart-reading';
-          const teamId = coopTeamByWatch[device_id];
-          if (teamId) div.classList.add(`coop-${teamId.replace('_', '-')}`);
           const device = document.createElement('span');
           device.className = 'current-heart-device';
           device.innerText = device_id;
@@ -231,24 +228,6 @@ function updateSetScoreDisplay(mode = null) {
   renderSetStatus();
 }
 
-function escapeResultText(value) {
-  return String(value).replace(/[&<>"']/g, char => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[char]));
-}
-
-function renderRankingCard(title, ranking, metric, final = false) {
-  return `<section class="game-score-history-item rank-row${final ? ' final-ranking' : ''}">
-    <h3 class="result-heading">${title}</h3>
-    <ol class="result-ranking-list">${ranking.map(item => `
-      <li class="result-player-row${Number(item.rank) === 1 ? ' first-place' : ''}">
-        <span class="result-rank">${escapeResultText(item.rank)}<small>位</small></span>
-        <span class="result-player-name">${escapeResultText(item.watch_id)}</span>
-        <strong class="result-value">${escapeResultText(metric(item))}</strong>
-      </li>`).join('')}</ol>
-  </section>`;
-}
-
 async function refreshJengaSeries() {
   try {
     const res = await fetch("/jenga_series", { cache: "no-store" });
@@ -262,28 +241,47 @@ async function refreshJengaSeries() {
     }
     const history = document.getElementById("game-score-history");
     const scoreHistory = Array.isArray(data.set_history) ? data.set_history : [];
-    const setCards = scoreHistory.map(result => {
+    history.innerHTML = scoreHistory.map(result => {
       const scores = Object.entries(result.scores || {})
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([watchId, score]) => `<li class="result-set-score"><span class="result-player-name">${escapeResultText(watchId)}</span><strong class="result-value">${escapeResultText(score.total_score || 0)}点</strong></li>`)
-        .join("");
+        .map(([watchId, score]) => `${watchId}: ${score.total_score || 0}点`)
+        .join(" / ");
+      const mvp = result.mvp ? ` / 妨害MVP: ${result.mvp}` : "";
       const collapsedPlayer = result.collapsed_player || "なし（終了ボタン）";
-      return `<section class="game-score-history-item set-row">
-        <h3 class="result-heading">SET ${escapeResultText(result.set)} 終了</h3>
-        <div class="result-detail">倒壊: ${escapeResultText(collapsedPlayer)}${result.mvp ? ` / 妨害MVP: ${escapeResultText(result.mvp)}` : ''}</div>
-        <ul class="result-set-scores">${scores}</ul>
-      </section>`;
+      return `
+        <div class="game-score-history-item set-row">
+          <div class="info-label">SET</div>
+          SET ${result.set} 終了 / 倒壊: ${collapsedPlayer}${mvp}<br>${scores}
+        </div>
+      `;
     }).join("");
     const interferenceRanking = Array.isArray(data.interference_ranking) ? data.interference_ranking : [];
+    if (interferenceRanking.length) {
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">順位</div>
+          現在の妨害順位: ${interferenceRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.success_count}回)`).join(" / ")}
+        </div>
+      `;
+    }
     const stateRanking = Array.isArray(data.state_ranking) ? data.state_ranking : [];
+    if (data.scoring_mode === "state" && stateRanking.length) {
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">状態管理</div>
+          ノルマ維持: ${stateRanking.map(item => `${item.rank}位 ${item.watch_id} (${(item.quota_keep_ms / 1000).toFixed(1)}秒)`).join(" / ")}
+        </div>
+      `;
+    }
     const finalRanking = Array.isArray(data.final_ranking) ? data.final_ranking : [];
-    history.innerHTML = [
-      finalRanking.length ? renderRankingCard("最終総合順位", finalRanking, item => `${item.total_score}点`, true) : '',
-      interferenceRanking.length ? renderRankingCard("現在の妨害順位", interferenceRanking, item => `${item.success_count}回`) : '',
-      data.scoring_mode === "state" && stateRanking.length
-        ? renderRankingCard("ノルマ維持順位", stateRanking, item => `${(item.quota_keep_ms / 1000).toFixed(1)}秒`) : '',
-      setCards
-    ].join("");
+    if (finalRanking.length) {
+      history.innerHTML += `
+        <div class="game-score-history-item rank-row">
+          <div class="info-label">総合</div>
+          最終総合順位: ${finalRanking.map(item => `${item.rank}位 ${item.watch_id} (${item.total_score}点)`).join(" / ")}
+        </div>
+      `;
+    }
   } catch (e) {
     console.error("連続ゲーム情報の取得に失敗", e);
   }
@@ -779,63 +777,6 @@ async function refreshCurrentTarget() {
       const usedEl = document.getElementById('current-used');
       if (usedEl) usedEl.innerText = '利用中の心拍: 未設定';
       return;
-    }
-
-    const modeResponse = await fetch('/get_control_mode', { cache: 'no-store' });
-    const controlMode = (await modeResponse.json()).mode;
-    if (controlMode === 'team_coop') {
-      const coopResponse = await fetch('/coop_status', { cache: 'no-store' });
-      const coop = await coopResponse.json();
-      const teams = coop.teams || {};
-      coopTeamByWatch = {};
-      Object.entries(teams).forEach(([teamId, members]) => {
-        (members || []).forEach(watchId => { coopTeamByWatch[watchId] = teamId; });
-      });
-      const teamDisplay = document.getElementById('coop-team-display');
-      if (teamDisplay) {
-        teamDisplay.style.display = 'grid';
-        teamDisplay.innerHTML = `
-          <div class="coop-team-card coop-team-a"><strong>チームA</strong><span>${(teams.team_a || []).join('・') || '未設定'}</span><b>${coop.team_scores?.team_a || 0}点</b></div>
-          <div class="coop-team-card coop-team-b"><strong>チームB</strong><span>${(teams.team_b || []).join('・') || '未設定'}</span><b>${coop.team_scores?.team_b || 0}点</b></div>`;
-      }
-      const state = coop.turn_state || {};
-      const heartbeat = Number(state.heartbeat);
-      const threshold = Number(state.threshold);
-      const hasHeartbeat = state.heartbeat != null && Number.isFinite(heartbeat);
-      const hasThreshold = state.threshold != null && Number.isFinite(threshold);
-      const remaining = hasHeartbeat && hasThreshold ? Math.max(0, threshold - heartbeat) : null;
-      const status = state.success ? '達成' : '挑戦中';
-      const statusClass = state.success ? 'status-success' : 'status-pending';
-      const attackEl = document.getElementById('attack-status');
-      const details = document.getElementById('attack-details');
-      const usedEl = document.getElementById('current-used');
-      document.getElementById('current-target').innerText = `サポート役: ${state.supporter || '未設定'}`;
-      if (usedEl) usedEl.innerText = `プレイヤー: ${state.current_turn || current} / サポート: ${state.supporter || '未設定'} / 回転速度: ${state.rpm || 40} rpm`;
-      if (attackEl) attackEl.innerText = state.success
-        ? '協力サポート成功：10 RPMへ段階的に減速中'
-        : '協力サポート挑戦中：ノルマ到達で回転が落ち着きます';
-      if (details) details.innerHTML = `
-        <div class="challenge-heading"><h3>協力サポート</h3><span class="challenge-direction-up">▲ 心拍数を上げよう</span></div>
-        <div class="challenge-players">
-          <article class="challenge-player ${statusClass}">
-            <div class="challenge-player-heading"><strong>${state.supporter || 'サポート役未設定'}</strong>
-              <span class="attack-status-badge ${statusClass}">${status}</span></div>
-            <div class="challenge-goal-row">
-              <div class="challenge-goal"><span>目標心拍数（ノルマ）</span><strong>${hasThreshold ? `${Math.ceil(threshold)} <small>BPM 以上</small>` : '未設定'}</strong></div>
-              <div class="challenge-direction-cue challenge-direction-up"><span class="challenge-big-arrow" aria-hidden="true"></span><strong>上げよう</strong></div>
-            </div>
-            <div class="challenge-current"><span>現在の心拍数</span><strong>${hasHeartbeat ? `${Math.round(heartbeat)} <small>BPM</small>` : '未取得'}</strong></div>
-            <p class="challenge-guidance">${state.success ? 'サポート成功！回転がゆっくりになります' : remaining == null ? '心拍数・ノルマの取得を待っています' : `あと ${Math.ceil(remaining)} BPM 上げよう`}</p>
-          </article>
-        </div>`;
-      return;
-    }
-
-    coopTeamByWatch = {};
-    const teamDisplay = document.getElementById('coop-team-display');
-    if (teamDisplay) {
-      teamDisplay.style.display = 'none';
-      teamDisplay.innerHTML = '';
     }
 
     const res = await fetch('/get_rotation_status');

@@ -14,11 +14,9 @@ from score_logic import (
     attack_challenge_score_awards,
     apply_state_bonus,
     calculate_final_ranking,
-    calculate_attack_metrics,
     calculate_interference_ranking,
     calculate_state_ranking,
     calculate_set_score,
-    determine_impact_winner,
     normalize_scores,
     normalize_series_scores,
     turn_scoring_targets,
@@ -26,7 +24,7 @@ from score_logic import (
 
 from heart_api import heart_api
 from turn_api import turn_api
-from id_api import id_api, registration_lock
+from id_api import id_api
 from flask import send_file, jsonify
 from datetime import datetime, timedelta
 
@@ -35,20 +33,9 @@ app.register_blueprint(heart_api)
 app.register_blueprint(turn_api)
 app.register_blueprint(id_api)
 
-
-@app.after_request
-def disable_settings_cache(response):
-    """管理画面の更新が古いHTML/JSキャッシュに隠れないようにする。"""
-    if request.path.endswith(("/settings.html", "/app.js", "/styles.css")):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
-
 clients = {}
+id_counter = 1
 file_lock = threading.Lock()
-watch_assignment_lock = registration_lock
-MAX_WATCHES = 4
 DATA_FILE = 'heart_rates.json'
 GAME_STATUS_FILE = 'game_status.json'
 TURN_FILE = 'turn.json'
@@ -71,7 +58,6 @@ ATTACK_SCORING_FILE = os.path.join(BASE_DIR, "attack_scoring.json")
 CSV_HISTORY_FILE = os.path.join(BASE_DIR, "csv_history.json")
 LIVE_CSV_FILE = os.path.join(BASE_DIR, "live_rotation.csv")
 JENGA_SERIES_FILE = os.path.join(BASE_DIR, "jenga_series.json")
-COOP_FILE = os.path.join(BASE_DIR, "coop_game.json")
 CSV_COLUMNS = [
     "timestamp", "device_id", "heartbeat", "baseline", "diff", "abs_diff",
     "game_phase", "current_turn", "control_mode", "random_extreme",
@@ -97,84 +83,6 @@ ATTACK_CHALLENGE_RULES = {
     "up_after_down_turn_start_offset": 20, #下降ターンの後の上昇はターン開始時の心拍数から20上げる
     "up_repeat_turn_start_offset": 10,#上昇ターンの後の上昇はターン開始時の心拍数から10上げる
 }
-
-COOP_DEFAULTS = {
-    "assignment_mode": "specified",
-    "pairing": "12_34",
-    "quota_offset": 10,
-    "initial_rpm": 40,
-    "supported_rpm": 10,
-}
-
-
-def load_coop_state():
-    state = load_json_file(COOP_FILE)
-    return state if isinstance(state, dict) else {}
-
-
-def save_coop_state(state):
-    save_json_file(COOP_FILE, state, log=False)
-
-
-def coop_pairing(watch_ids, assignment_mode, pairing):
-    watches = sorted(set(watch_ids), key=get_watch_sort_key)
-    if len(watches) != 4:
-        return None
-    if assignment_mode == "random":
-        random.shuffle(watches)
-        return {"team_a": sorted(watches[:2], key=get_watch_sort_key), "team_b": sorted(watches[2:], key=get_watch_sort_key)}
-    indexes = {"12_34": ((0, 1), (2, 3)), "13_24": ((0, 2), (1, 3)), "14_23": ((0, 3), (1, 2))}
-    left, right = indexes.get(pairing, indexes["12_34"])
-    return {"team_a": [watches[i] for i in left], "team_b": [watches[i] for i in right]}
-
-
-def coop_team_for(watch_id, teams):
-    return next((team_id for team_id, members in teams.items() if watch_id in members), None)
-
-
-def initialize_coop_game(watch_ids, total_sets):
-    settings = {**COOP_DEFAULTS, **load_coop_state().get("settings", {})}
-    teams = coop_pairing(watch_ids, settings["assignment_mode"], settings["pairing"])
-    state = {
-        "active": True, "set_finished": False, "game_number": 1, "total_sets": total_sets,
-        "settings": settings, "teams": teams, "team_scores": {"team_a": 0, "team_b": 0},
-        "set_history": [], "turn_state": {}, "winner": None,
-    }
-    save_coop_state(state)
-    return state
-
-
-def update_coop_turn_state(state):
-    current_turn = load_json_file(TURN_FILE).get("current_turn")
-    teams = state.get("teams", {})
-    team_id = coop_team_for(current_turn, teams)
-    members = teams.get(team_id, [])
-    supporter = next((watch_id for watch_id in members if watch_id != current_turn), None)
-    turn_state = state.get("turn_state", {})
-    if turn_state.get("current_turn") != current_turn:
-        baseline = load_json_file(BASELINE_FILE).get(supporter)
-        try:
-            threshold = float(baseline) + float(state["settings"].get("quota_offset", 10))
-        except (TypeError, ValueError):
-            threshold = None
-        turn_state = {
-            "current_turn": current_turn, "team_id": team_id, "supporter": supporter,
-            "threshold": threshold, "success": False, "success_timestamp": None,
-        }
-    heartbeat = get_latest_heartbeats().get(supporter)
-    try:
-        reached = float(heartbeat) >= float(turn_state.get("threshold"))
-    except (TypeError, ValueError):
-        reached = False
-    if reached and not turn_state.get("success"):
-        turn_state["success"] = True
-        turn_state["success_timestamp"] = int(time.time() * 1000)
-    turn_state["heartbeat"] = heartbeat
-    turn_state["rpm"] = state["settings"].get("supported_rpm", 10) if turn_state.get("success") else state["settings"].get("initial_rpm", 40)
-    turn_state["direction"] = "c" if turn_state.get("success") else "coop_random"
-    state["turn_state"] = turn_state
-    save_coop_state(state)
-    return state
 
 
 # -------------------------
@@ -206,34 +114,6 @@ def load_json_file(filename):
                 print(f"[WARN] Invalid JSON file: {filename}")
                 return {}
         return {}
-
-
-def assign_watch_id(ip):
-    """Assign the lowest available watch ID, preserving an existing valid IP mapping."""
-    with watch_assignment_lock:
-        assigned_ids = load_json_file(ASSIGNED_FILE)
-        existing_id = assigned_ids.get(ip)
-        occupied_ids = {
-            watch_id for other_ip, watch_id in assigned_ids.items()
-            if other_ip != ip
-        }
-        valid_ids = {f"watch{number}" for number in range(1, MAX_WATCHES + 1)}
-
-        if existing_id in valid_ids and existing_id not in occupied_ids:
-            device_id = existing_id
-        else:
-            device_id = next(
-                (f"watch{number}" for number in range(1, MAX_WATCHES + 1)
-                 if f"watch{number}" not in occupied_ids),
-                None,
-            )
-            if device_id is None:
-                return None
-            assigned_ids[ip] = device_id
-            save_json_file(ASSIGNED_FILE, assigned_ids, log=False)
-
-        clients[ip] = device_id
-        return device_id
 
 
 def load_rotation_settings():
@@ -363,7 +243,6 @@ def record_attack_success_event(attacker, success):
         "threshold": success.get("threshold"),
         "heartbeat": success.get("heartbeat"),
         "direction": success.get("direction"),
-        "target": success.get("target"),
         "turn": success.get("turn"),
         "quota_keep_ms": success.get("quota_keep_ms", 0),
         "quota_error_total": success.get("quota_error_total", 0),
@@ -414,8 +293,6 @@ def finish_set(collapsed_player):
         "mvp": mvp,
         "set_points": set_points,
         "scores": scores,
-        "attack_metrics": calculate_attack_metrics(series["current_set_events"], series["watch_ids"]),
-        "impact_winner": determine_impact_winner(series["current_set_events"], series["watch_ids"]),
     }
     series["scores"] = scores
     series["set_history"].append(result)
@@ -424,14 +301,9 @@ def finish_set(collapsed_player):
 
     if series["game_number"] >= series["total_sets"]:
         if series["scoring_mode"] == "state":
-            series["scores"], state_ranking = apply_state_bonus(
+            series["scores"], _ = apply_state_bonus(
                 series["scores"], series["attack_events"], series["watch_ids"]
             )
-            result["state_bonus_winner"] = (
-                state_ranking[0]["watch_id"]
-                if state_ranking and state_ranking[0]["quota_keep_ms"] > 0 else None
-            )
-            result["scores"] = series["scores"]
         series["final_ranking"] = calculate_final_ranking(series["scores"], series["watch_ids"])
         series["active"] = False
 
@@ -634,7 +506,7 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
     seen_turns = set(round_state.get("seen_turns", []))
     completed = bool(round_state.get("completed"))
 
-    if current_turn == previous_turn:
+    if current_turn not in assigned_watches or current_turn == previous_turn:
         return round_state
 
     if completed:
@@ -642,7 +514,7 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
             "used_attackers": [],
             "seen_turns": [current_turn],
             "last_turn": current_turn,
-            "completed": False,
+            "completed": assigned_watches == {current_turn},
         }
         # 一周後は再妨害を許可するが、次ターンのノルマ計算に必要な
         # previous_direction は消さない。
@@ -660,6 +532,10 @@ def update_attack_round_for_turn(current_turn, assigned_watches):
     }
     save_attack_round(round_state)
     return round_state
+
+
+# The turn blueprint advances the same cycle without waiting for status polling.
+app.extensions["update_attack_round_for_turn"] = update_attack_round_for_turn
 
 
 def load_attack_pending():
@@ -753,7 +629,10 @@ def get_attack_challenge_condition():
         return condition
 
     if isinstance(condition, dict) and condition.get("turn") and condition.get("turn") != current_turn:
-        reset_attack_cycle_state(reset_condition=False)
+        # Clear per-turn results, retaining attack usage until the full cycle ends.
+        save_attack_targets({})
+        save_attack_pending({})
+        save_attack_success({})
 
     previous_direction = condition.get("direction") if isinstance(condition, dict) else None
     experienced_attackers = set(condition.get("experienced_attackers", []))
@@ -945,9 +824,6 @@ def start_game():
 
     assigned_watch_ids = set(assigned_ids.values())
 
-    if load_json_file(CONTROL_FILE).get("mode") == "team_coop" and len(assigned_watch_ids) != 4:
-        return jsonify({"status": "error", "message": "2対2協力モードはWatchが4台接続されている場合のみ開始できます"}), 400
-
     # ✅ 1) そもそもwatchが認識できてないなら開始させない
     if not assigned_watch_ids:
         return jsonify({
@@ -998,16 +874,13 @@ def start_game():
         "current_turn": ids[0] if ids else None,
         "turn_number": 1 if ids else 0,
     })
+    update_attack_round_for_turn(ids[0], set(ids))
     if request.args.get("mode") == "jenga":
         try:
             total_sets = max(1, int(request.args.get("sets", 3)))
         except (TypeError, ValueError):
             total_sets = 3
-        if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
-            initialize_coop_game(ids, total_sets)
-            save_json_file(JENGA_SERIES_FILE, {}, log=False)
-        else:
-            initialize_jenga_series(ids, total_sets, load_attack_scoring()["mode"])
+        initialize_jenga_series(ids, total_sets, load_attack_scoring()["mode"])
         if os.path.exists(LIVE_CSV_FILE):
             with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
                 pass
@@ -1029,65 +902,7 @@ def get_jenga_series():
         **series,
         "interference_ranking": calculate_interference_ranking(series["attack_events"], series["watch_ids"]),
         "state_ranking": calculate_state_ranking(series["attack_events"], series["watch_ids"]),
-        "current_set_attack_metrics": calculate_attack_metrics(
-            series["current_set_events"], series["watch_ids"]
-        ),
     })
-
-
-@app.route('/coop_settings', methods=['GET', 'POST'])
-def coop_settings():
-    state = load_coop_state()
-    settings = {**COOP_DEFAULTS, **state.get("settings", {})}
-    if request.method == 'GET':
-        return jsonify({"settings": settings, "teams": state.get("teams", {})})
-    if load_json_file(GAME_STATUS_FILE).get("running", False):
-        return jsonify({"status": "error", "message": "ゲーム中はチーム設定を変更できません"}), 409
-    data = request.get_json(silent=True) or {}
-    assignment_mode = data.get("assignment_mode", settings["assignment_mode"])
-    pairing = data.get("pairing", settings["pairing"])
-    if assignment_mode not in {"specified", "random"} or pairing not in {"12_34", "13_24", "14_23"}:
-        return jsonify({"status": "error", "message": "チーム設定が不正です"}), 400
-    settings.update({"assignment_mode": assignment_mode, "pairing": pairing})
-    state["settings"] = settings
-    watches = set(load_json_file(ASSIGNED_FILE).values())
-    state["teams"] = coop_pairing(watches, assignment_mode, pairing) or {}
-    save_coop_state(state)
-    return jsonify({"status": "ok", "settings": settings, "teams": state["teams"]})
-
-
-@app.route('/select_coop_mode', methods=['POST'])
-def select_coop_mode():
-    """Atomically save team settings and select the 2-vs-2 cooperative mode."""
-    if load_json_file(GAME_STATUS_FILE).get("running", False):
-        return jsonify({"status": "error", "message": "ゲーム中は協力モードへ変更できません"}), 409
-    watches = set(load_json_file(ASSIGNED_FILE).values())
-    if len(watches) != 4:
-        return jsonify({"status": "error", "message": f"2対2協力モードにはWatchが4台必要です（現在{len(watches)}台）"}), 400
-    data = request.get_json(silent=True) or {}
-    assignment_mode = data.get("assignment_mode", "specified")
-    pairing = data.get("pairing", "12_34")
-    if assignment_mode not in {"specified", "random"} or pairing not in {"12_34", "13_24", "14_23"}:
-        return jsonify({"status": "error", "message": "チーム設定が不正です"}), 400
-    settings = {**COOP_DEFAULTS, "assignment_mode": assignment_mode, "pairing": pairing}
-    state = load_coop_state()
-    state["settings"] = settings
-    state["teams"] = coop_pairing(watches, assignment_mode, pairing)
-    save_coop_state(state)
-    save_json_file(CONTROL_FILE, {"mode": "team_coop"}, log=False)
-    return jsonify({
-        "status": "ok", "mode": "team_coop", "settings": settings,
-        "teams": state["teams"], "message": "2対2協力モードに変更しました",
-    })
-
-
-@app.route('/coop_status')
-def coop_status():
-    state = load_coop_state()
-    enabled = load_json_file(CONTROL_FILE).get("mode") == "team_coop"
-    if enabled and state.get("active") and not state.get("set_finished"):
-        state = update_coop_turn_state(state)
-    return jsonify({**state, "enabled": enabled})
 
 
 @app.route('/jenga_settings', methods=['POST'])
@@ -1139,42 +954,31 @@ def next_jenga_game():
     if missing:
         return jsonify({"status": "error", "message": "平均値が未取得です: " + ", ".join(missing)}), 400
 
-    if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
-        coop = load_coop_state()
-        if not coop.get("active") or not coop.get("set_finished") or coop.get("game_number", 1) >= coop.get("total_sets", 1):
-            return jsonify({"status": "error", "message": "協力モードの次SETを開始できません"}), 409
-        coop["game_number"] += 1
-        coop["set_finished"] = False
-        coop["turn_state"] = {}
-        save_coop_state(coop)
-        series = None
-    else:
-        series = start_next_set()
-    if load_json_file(CONTROL_FILE).get("mode") != "team_coop" and not series:
+    series = start_next_set()
+    if not series:
         return jsonify({"status": "error", "message": "倒壊によるセット終了後、最終セット前のみ次セットを開始できます"}), 409
 
     reset_attack_cycle_state()
     save_json_file(ROTATION_STATUS_FILE, {}, log=False)
     save_json_file(TURN_FILE, {"current_turn": assigned_ids[0], "turn_number": 1}, log=False)
+    update_attack_round_for_turn(assigned_ids[0], set(assigned_ids))
     status.update({"running": True, "game_over": False, "baseline_mode": False})
     save_json_file(GAME_STATUS_FILE, status, log=False)
 
-    coop_mode = load_json_file(CONTROL_FILE).get("mode") == "team_coop"
-    game_number = coop["game_number"] if coop_mode else series["game_number"]
     history = load_csv_history()
     history.append({
         "timestamp": int(time.time() * 1000),
         "game_phase": "game_start",
-        "score_reason": f"ジェンガ第{game_number}ゲーム開始",
-        "series_id": "coop" if coop_mode else series["series_id"],
-        "game_number": game_number,
+        "score_reason": f"ジェンガ第{series['game_number']}ゲーム開始",
+        "series_id": series["series_id"],
+        "game_number": series["game_number"],
     })
     save_json_file(CSV_HISTORY_FILE, history, log=False)
     return jsonify({
         "status": "ok",
-        "game_number": game_number,
-        "scores": coop["team_scores"] if coop_mode else series["scores"],
-        "score_history": coop["set_history"] if coop_mode else series["set_history"],
+        "game_number": series["game_number"],
+        "scores": series["scores"],
+        "score_history": series["set_history"],
     })
 
 
@@ -1219,9 +1023,7 @@ def get_game_status():
 
 @app.route('/reset', methods=['POST'])
 def reset_server():
-    with watch_assignment_lock:
-        save_json_file(ASSIGNED_FILE, {})
-        clients.clear()
+    global id_counter, clients
 
     save_json_file(DATA_FILE, {})
     save_json_file(CSV_HISTORY_FILE, [], log=False)
@@ -1231,14 +1033,17 @@ def reset_server():
         "baseline_mode": False
     })
     save_json_file(TURN_FILE, {"current_turn": None, "turn_number": 0})
+    save_json_file(ASSIGNED_FILE, {})
     save_json_file(BASELINE_FILE, {})
     save_json_file(SCORES_FILE, {}, log=False)
     save_json_file(ATTACK_SCORING_FILE, {"mode": "success"}, log=False)
     save_json_file(JENGA_SERIES_FILE, {}, log=False)
-    save_json_file(COOP_FILE, {}, log=False)
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
+
+    clients = {}
+    id_counter = 1
 
     print("[API] サーバーデータを完全初期化しました")
     return jsonify({
@@ -1262,15 +1067,23 @@ def reset_game_only():
     assigned_watches = set(load_json_file(ASSIGNED_FILE).values())
     save_json_file(SCORES_FILE, {watch_id: 0 for watch_id in assigned_watches}, log=False)
     save_json_file(JENGA_SERIES_FILE, {}, log=False)
-    save_json_file(COOP_FILE, {}, log=False)
     return jsonify({"status": "ok", "message": "ゲーム状態を完全にリセットしました"})
 
 @app.route("/assign_id")
 def assign_id():
+    global id_counter
     ip = request.remote_addr
-    device_id = assign_watch_id(ip)
-    if device_id is None:
-        return jsonify({"status": "error", "message": "接続できるWatchは4台までです"}), 403
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    if ip in assigned_ids:
+        device_id = assigned_ids[ip]
+    else:
+        existing_ids = set(assigned_ids.values())
+        while f"watch{id_counter}" in existing_ids:
+            id_counter += 1
+        device_id = f"watch{id_counter}"
+        assigned_ids[ip] = device_id
+        save_json_file(ASSIGNED_FILE, assigned_ids)
+    clients[ip] = device_id
     return jsonify({"device_id": device_id})
 
 @app.route("/clients")
@@ -1296,6 +1109,7 @@ def set_turn():
         return jsonify({"status": "error", "message": "指定されたIDが存在しません"}), 400
     turn_state = load_json_file(TURN_FILE)
     turn_number = turn_state.get("turn_number", 0)
+    update_attack_round_for_turn(turn_state.get("current_turn"), set(assigned_ids.values()))
     if turn_state.get("current_turn") != new_turn:
         current_turn = turn_state.get("current_turn")
         if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
@@ -1307,6 +1121,7 @@ def set_turn():
         "current_turn": new_turn,
         "turn_number": turn_number,
     })
+    update_attack_round_for_turn(new_turn, set(assigned_ids.values()))
     print(f"[API] 管理者操作: ターンを {new_turn} に設定しました")
     return jsonify({"status": "ok", "message": f"{new_turn} に設定しました"})
 
@@ -1333,29 +1148,6 @@ def record_collapse():
         return jsonify({"status": "error", "message": "現在の手番が設定されていません"}), 400
 
     data = request.get_json(silent=True) or {}
-    if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
-        coop = load_coop_state()
-        collapsed_team = coop_team_for(current_turn, coop.get("teams", {}))
-        scoring_team = "team_b" if collapsed_team == "team_a" else "team_a"
-        coop.setdefault("team_scores", {"team_a": 0, "team_b": 0})[scoring_team] += 1
-        coop.setdefault("set_history", []).append({
-            "set": coop.get("game_number", 1), "collapsed_player": current_turn,
-            "collapsed_team": collapsed_team, "scoring_team": scoring_team,
-            "team_scores": dict(coop["team_scores"]),
-        })
-        coop["set_finished"] = True
-        if coop.get("game_number", 1) >= coop.get("total_sets", 1):
-            coop["active"] = False
-            high_score = max(coop["team_scores"].values())
-            winners = [team for team, score in coop["team_scores"].items() if score == high_score]
-            coop["winner"] = winners[0] if len(winners) == 1 else "draw"
-        save_coop_state(coop)
-        game_status.update({"running": False, "game_over": not coop.get("active")})
-        save_json_file(GAME_STATUS_FILE, game_status, log=False)
-        return jsonify({
-            "status": "ok", "watch_id": current_turn, "set_finished": True,
-            "series_complete": not coop.get("active"), "coop": coop,
-        })
     series = load_jenga_series()
     if series["active"]:
         resolve_attack_challenge()
@@ -1408,16 +1200,23 @@ def record_collapse():
 
 @app.route('/reconnect', methods=['POST'])
 def reconnect():
-    data = request.get_json(silent=True) or {}
-    requested_id = data.get("reconnect_id")
+    data = request.get_json()
+    reconnect_id = data.get("reconnect_id")
     ip = request.remote_addr
-    if not requested_id:
+    if not reconnect_id:
         return jsonify({"status": "error", "message": "IDが指定されていません"}), 400
-    device_id = assign_watch_id(ip)
-    if device_id is None:
-        return jsonify({"status": "error", "message": "接続できるWatchは4台までです"}), 403
-    print(f"[API] 再接続: IP {ip} に {device_id} を割り当てました")
-    return jsonify({"status": "ok", "message": f"{device_id} を再登録しました", "device_id": device_id})
+    assigned_ids = load_json_file(ASSIGNED_FILE)
+    existing_ids = set(assigned_ids.values())
+    if reconnect_id in existing_ids and assigned_ids.get(ip) != reconnect_id:
+        id_num = 1
+        while f"watch{id_num}" in existing_ids:
+            id_num += 1
+        reconnect_id = f"watch{id_num}"
+    clients[ip] = reconnect_id
+    assigned_ids[ip] = reconnect_id
+    save_json_file(ASSIGNED_FILE, assigned_ids)
+    print(f"[API] 再接続: IP {ip} に {reconnect_id} を割り当てました")
+    return jsonify({"status": "ok", "message": f"{reconnect_id} を再登録しました", "device_id": reconnect_id})
 
 @app.route('/export_csv')
 def export_csv():
@@ -1677,7 +1476,6 @@ def set_control_mode():
         "random_diff",
         "attack_challenge",
         "attack_challenge_wait",
-        "team_coop",
         "manual_test",
     }
 
@@ -1689,9 +1487,6 @@ def set_control_mode():
 
     assigned_ids = load_json_file(ASSIGNED_FILE)
     watch_ids = set(assigned_ids.values())
-
-    if mode == "team_coop" and len(watch_ids) != 4:
-        return jsonify({"status": "error", "message": "2対2協力モードにはWatchが4台必要です"}), 400
 
     # 他人の心拍を利用するモードは2台以上必要
     other_watch_modes = {"next_fast", "prev_fast", "random_fast", "highest_diff", "lowest_diff", "random_diff"}
@@ -1737,8 +1532,6 @@ def set_attack_target():
 @app.route('/attack_signal', methods=['POST'])
 def receive_attack_signal():
     """Pixel Watchからの妨害信号を受け取り、現在の妨害対象へ反映する。"""
-    if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
-        return jsonify({"status": "ignored", "message": "2対2協力モードでは妨害ボタンは使用できません"})
     data = request.get_json(silent=True) or {}
     attacker = data.get("attacker")
     current_turn = load_json_file(TURN_FILE).get("current_turn")
@@ -2022,11 +1815,6 @@ def stop_baseline():
 @app.route('/speed.html')
 def serve_speed():
     return send_from_directory(STATIC_FOLDER, 'speed.html')
-
-@app.route('/admin')
-@app.route('/admin.html')
-def serve_admin():
-    return send_from_directory(STATIC_FOLDER, 'admin.html')
 
 @app.route('/babanuki.html')
 def serve_babanuki():

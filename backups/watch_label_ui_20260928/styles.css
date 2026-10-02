@@ -496,103 +496,49 @@ select {
 .game-score-history {
   margin-top: 10px;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: stretch;
   gap: 8px;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 4px;
 }
 
-.game-score-history:empty { margin-top: 0; padding-bottom: 0; }
-
 .game-score-history-item {
-  flex: 1 0 auto;
-  min-width: 240px;
   border-radius: 10px;
-  padding: 10px 12px;
-  color: #14263d;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.4;
-  text-align: left;
-  border: 2px solid #7b96b4;
-  background: #fff;
+  padding: 8px 10px;
+  font-size: 0.86em;
+  font-weight: bold;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .game-score-history-item.set-row {
-  border-color: #a46b12;
-  background: #fffaf0;
+  background: #fff8e1;
+  border-color: #ffcc80;
 }
 
-.game-score-history-item.final-ranking {
-  border: 2px solid #174a83;
-  background: #eef5ff;
+.game-score-history-item.rank-row {
+  background: #eef7ff;
+  border-color: #90caf9;
 }
 
-.result-heading {
-  margin: 0 0 8px;
-  font-size: 20px;
-  line-height: 1.4;
-  color: #14263d;
-}
-
-.final-ranking .result-heading {
-  margin: -10px -12px 8px;
-  padding: 6px 12px;
-  border-radius: 7px 7px 0 0;
-  background: #174a83;
-  color: #fff;
-  font-size: 22px;
-}
-
-.result-ranking-list, .result-set-scores {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 8px;
-}
-
-.result-player-row {
-  display: grid;
-  grid-template-columns: auto auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid #a7b7ca;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.result-player-row.first-place {
-  border-color: #a46b12;
-  background: #fff3ce;
-}
-
-.result-rank {
-  font-size: 28px;
+.game-score-history-item .info-label {
+  display: inline-block;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 4px;
   font-weight: 900;
-  color: #174a83;
-  white-space: nowrap;
 }
 
-.result-rank small { font-size: 18px; margin-left: 4px; }
-.result-player-name { white-space: nowrap; }
-.result-value { font-size: 22px; white-space: nowrap; }
-.result-detail { margin-bottom: 8px; white-space: nowrap; }
-.result-set-score {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid #c4a56e;
-  border-radius: 8px;
-  background: #fff;
+.game-score-history-item.set-row .info-label {
+  background: #ffe082;
+  color: #6d4c00;
+}
+
+.game-score-history-item.rank-row .info-label {
+  background: #bbdefb;
+  color: #0d47a1;
 }
 
 .chart-wrapper {
@@ -1005,11 +951,7 @@ select {
 .coop-team-b { background: #fff0f1; border: 2px solid #efa5ac; }
 
 .current-heart-device {
-  font-size: clamp(2rem, 3.5vw, 3.5rem);
-  font-weight: 900;
-  line-height: 1.1;
-  letter-spacing: 0.03em;
-  color: #172033;
+  font-size: 1rem;
   overflow-wrap: anywhere;
 }
 
@@ -1042,28 +984,16 @@ select {
   gap: 16px;
 }
 .challenge-player { border-radius: 14px; padding: 20px; min-width: 0; }
-.challenge-player-heading > strong {
-  font-size: clamp(1.5rem, 2vw, 2rem);
-  font-weight: 950;
-  color: #082f57;
-  letter-spacing: 0.02em;
-  overflow-wrap: anywhere;
-}
+.challenge-player-heading > strong { font-size: 1.25rem; overflow-wrap: anywhere; }
 .challenge-goal { margin-top: 20px; display: grid; gap: 8px; color: #123b65; }
-.challenge-goal > span { font-weight: 900; font-size: 1.15rem; }
-.challenge-goal > strong {
-  font-size: clamp(3.25rem, 4.5vw, 5rem);
-  font-weight: 950;
-  line-height: 1.1;
-  color: #062f5b;
-}
-.challenge-goal small { font-size: 1.35rem; font-weight: 900; white-space: nowrap; }
+.challenge-goal > span { font-weight: 700; font-size: 1.1rem; }
+.challenge-goal > strong { font-size: clamp(2.75rem, 4vw, 4.5rem); line-height: 1.2; }
+.challenge-goal small { font-size: 1.25rem; white-space: nowrap; }
 .challenge-current { margin-top: 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; color: #243447; }
-.challenge-current > span { font-size: 1.05rem; font-weight: 800; }
-.challenge-current > strong { font-size: 2.4rem; font-weight: 950; color: #172033; }
-.challenge-current small { font-size: 1.1rem; font-weight: 900; }
-.challenge-guidance { margin: 16px 0 12px; padding: 12px; background: #fff; border-radius: 8px; font-size: 1.4rem; font-weight: 950; }
-.challenge-reference { font-size: 1.1rem; font-weight: 800; color: #374151; }
+.challenge-current > strong { font-size: 2rem; }
+.challenge-current small { font-size: 1rem; }
+.challenge-guidance { margin: 16px 0 12px; padding: 12px; background: #fff; border-radius: 8px; font-size: 1.25rem; font-weight: 800; }
+.challenge-reference { font-size: 0.95rem; color: #4b5563; }
 .challenge-empty { color: #4b5563; padding: 20px; }
 
 .challenge-direction-down { color: #1565c0; }

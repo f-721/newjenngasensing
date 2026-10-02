@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>心拍数モニター</title>
-  <link rel="stylesheet" href="/static/styles.css?v=horizontal-results-2">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <div class="dashboard">
@@ -16,7 +16,6 @@
       <div id="current-turn"></div>
       <div id="score-board" class="score-board"></div>
       <div id="game-score-history" class="game-score-history"></div>
-      <div id="coop-team-display" class="coop-team-display" style="display:none;"></div>
 
       <div class="status-row">
         <div id="status" class="status-badge">状態: 未設定</div>
@@ -33,7 +32,6 @@
         <div class="heart-rate-panel">
           <div class="heart-rate-box">
             <div id="rate"><p>読み込み中...</p></div>
-            <div id="attack-details" class="attack-card" aria-live="polite"></div>
             <div class="heart-info-layout">
               <div class="heart-info-status">
                 <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
@@ -45,6 +43,7 @@
                 <div id="mode-current" class="mode-current">現在の設定：未設定</div>
               </section>
             </div>
+            <div id="attack-details" class="attack-card" aria-live="polite"></div>
           </div>
         </div>
         <div class="graph-links" style="margin-top:12px; text-align:center;">
@@ -76,6 +75,6 @@
   <a href="/babanuki.html" class="mini-link-btn">ババ抜き画面へ</a>
   <div id="mode-banner" class="mode-banner"></div>
 
-  <script src="/static/app.js?v=horizontal-results-2"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
