@@ -5,6 +5,40 @@ const MAX_POINTS = 30;
 
 let heartDataInterval = null;
 let coopTeamByWatch = {};
+let displayedCurrentTurn = null;
+let displayedHeartTarget = null;
+
+function setHighlightedHeartTarget(watchId) {
+  displayedHeartTarget = watchId || null;
+  highlightCurrentTurn();
+  const usedEl = document.getElementById('current-used');
+  if (!usedEl) return;
+  usedEl.classList.toggle('has-highlighted-heart-target', Boolean(watchId));
+  usedEl.querySelector('.used-heart-heading')?.remove();
+  if (watchId) {
+    const heading = document.createElement('strong');
+    heading.className = 'used-heart-heading';
+    heading.textContent = `${watchId} の心拍を利用中`;
+    usedEl.prepend(heading);
+  }
+}
+
+function highlightCurrentTurn() {
+  document.querySelectorAll('#rate > [data-watch-id]').forEach(card => {
+    const active = card.dataset.watchId === displayedCurrentTurn;
+    card.classList.toggle('is-current-turn', active);
+    const used = card.dataset.watchId === displayedHeartTarget;
+    card.classList.toggle('uses-heartbeat', used);
+    const value = card.querySelector('.current-heart-value');
+    if (value) {
+      if (used) value.setAttribute('title', 'この心拍数を利用中');
+      else value.removeAttribute('title');
+    }
+    const badge = card.querySelector('.current-turn-badge');
+    if (badge) badge.hidden = !active;
+
+  });
+}
 
 function startFetching() {
   if (intervalId !== null) return;
@@ -51,6 +85,7 @@ async function fetchHeartRate() {
       for (const [device_id, record] of Object.entries(data)) {
         const bpm = record.heartbeat;
         const div = document.createElement('div');
+        div.dataset.watchId = device_id;
         const bpmText = (bpm !== undefined && bpm !== null) ? `${bpm}` : "--";
         if (rateContainer.closest('.heart-display-expanded')) {
           div.className = 'current-heart-reading';
@@ -65,7 +100,11 @@ async function fetchHeartRate() {
           const unit = document.createElement('span');
           unit.className = 'current-heart-unit';
           unit.innerText = 'bpm';
-          div.append(device, value, unit);
+          const badge = document.createElement('span');
+          badge.className = 'current-turn-badge';
+          badge.innerText = '現在の手番';
+          badge.hidden = device_id !== displayedCurrentTurn;
+          div.append(device, value, unit, badge);
         } else {
           div.innerText = `心拍数: ${bpmText} bpm (${device_id})`;
         }
@@ -80,6 +119,8 @@ async function fetchHeartRate() {
           }
         }
       }
+
+      highlightCurrentTurn();
 
       for (const [device_id, maxBpm] of Object.entries(maxHeartRates)) {
         const div = document.createElement('div');
@@ -259,9 +300,22 @@ function renderRankingCard(title, ranking, metric, final = false, interference =
   </section>`;
 }
 
+function rankByTotalScore(items) {
+  let previousScore = null;
+  let rank = 0;
+  return [...items].sort((a, b) => Number(b.total_score) - Number(a.total_score)
+    || a.watch_id.localeCompare(b.watch_id, undefined, { numeric: true }))
+    .map((item, index) => {
+      const score = Number(item.total_score);
+      if (score !== previousScore) rank = index + 1;
+      previousScore = score;
+      return { ...item, rank };
+    });
+}
+
 function getCurrentOverallRanking(data) {
   const watches = Array.isArray(data.watch_ids) ? data.watch_ids : [];
-  return watches.map(watchId => {
+  return rankByTotalScore(watches.map(watchId => {
     const score = (data.scores || {})[watchId] || {};
     const survival = Number(score.survival_score) || 0;
     const interference = Number(score.interference_score) || 0;
@@ -271,11 +325,7 @@ function getCurrentOverallRanking(data) {
       interference_score: interference,
       total_score: survival + interference + (Number(score.ranking_bonus) || 0)
     };
-  }).sort((a, b) => b.total_score - a.total_score
-    || b.survival_score - a.survival_score
-    || b.interference_score - a.interference_score
-    || (a.watch_id < b.watch_id ? -1 : a.watch_id > b.watch_id ? 1 : 0))
-    .map((item, index) => ({ ...item, rank: index + 1 }));
+  }));
 }
 
 async function refreshJengaSeries() {
@@ -305,7 +355,7 @@ async function refreshJengaSeries() {
     }).join("");
     const interferenceRanking = Array.isArray(data.interference_ranking) ? data.interference_ranking : [];
     const stateRanking = Array.isArray(data.state_ranking) ? data.state_ranking : [];
-    const finalRanking = Array.isArray(data.final_ranking) ? data.final_ranking : [];
+    const finalRanking = rankByTotalScore(Array.isArray(data.final_ranking) ? data.final_ranking : []);
     const currentRanking = getCurrentOverallRanking(data);
     history.innerHTML = [
       finalRanking.length ? renderRankingCard("最終総合順位", finalRanking, item => `${item.total_score}点`, true) : '',
@@ -353,15 +403,17 @@ async function resetServer() {
   try {
     const res = await fetch('/reset', { method: 'POST' });
     const data = await res.json();
-    localStorage.removeItem("maxHeartRates");
-    document.getElementById('rate').innerHTML = '<p>読み込み中...</p>';
-    const maxContainer = document.getElementById('max-rate');
-    if (maxContainer) maxContainer.innerHTML = '<p>最大心拍数を記録中...</p>';
-    document.getElementById('status').innerText = '状態: 停止';
-    await refreshGameStatus();
-    await refreshCurrentTurn();
-    await refreshClientList();
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.message || 'リセットに失敗しました');
+    }
+    for (const key of Object.keys(maxHeartRates)) delete maxHeartRates[key];
+    for (const timer of Object.values(baselineTimers)) clearTimeout(timer);
+    for (const timer of Object.values(baselineIntervals)) clearInterval(timer);
+    for (const key of ['maxHeartRates', 'fetchingStatus', 'finishedPlayers', 'babanukiLogs']) {
+      localStorage.removeItem(key);
+    }
     alert('リセットが完了しました');
+    window.location.reload();
   } catch (error) {
     console.error(error);
     alert('リセットリクエスト失敗');
@@ -485,6 +537,8 @@ async function refreshCurrentTurn() {
   try {
     const res = await fetch('/turn');
     const data = await res.json();
+    displayedCurrentTurn = data.current_turn || null;
+    highlightCurrentTurn();
     const turnNumber = Number(data.turn_number);
     const turnLabel = Number.isInteger(turnNumber) && turnNumber > 0
       ? `第${turnNumber}ターン　`
@@ -772,7 +826,7 @@ window.onload = async () => {
       const elem = document.getElementById(`baseline-${device}`);
 
       if (elem) {
-        elem.innerText = `${device} の平均値: ${avg} BPM`;
+        elem.innerText = `${device} の平均値: ${Math.round(avg)} BPM`;
       }
     }
   });
@@ -805,17 +859,23 @@ async function refreshCurrentTarget() {
     const resTurn = await fetch('/turn');
     const turn = await resTurn.json();
     const current = turn.current_turn;
+    displayedCurrentTurn = current || null;
+    highlightCurrentTurn();
+    const referenceDisplay = document.getElementById('comparison-reference');
 
     if (!current) {
+      if (referenceDisplay) referenceDisplay.innerText = '回転基準の心拍数: 手番未設定';
       document.getElementById('current-target').innerText = '利用対象: 未設定';
       const usedEl = document.getElementById('current-used');
       if (usedEl) usedEl.innerText = '利用中の心拍: 未設定';
+      setHighlightedHeartTarget(null);
       return;
     }
 
     const modeResponse = await fetch('/get_control_mode', { cache: 'no-store' });
     const controlMode = (await modeResponse.json()).mode;
     if (controlMode === 'team_coop') {
+      if (referenceDisplay) referenceDisplay.innerText = '協力モード：サポート成功に応じて回転速度が変わります';
       const coopResponse = await fetch('/coop_status', { cache: 'no-store' });
       const coop = await coopResponse.json();
       const teams = coop.teams || {};
@@ -843,6 +903,7 @@ async function refreshCurrentTarget() {
       const usedEl = document.getElementById('current-used');
       document.getElementById('current-target').innerText = `サポート役: ${state.supporter || '未設定'}`;
       if (usedEl) usedEl.innerText = `プレイヤー: ${state.current_turn || current} / サポート: ${state.supporter || '未設定'} / 回転速度: ${state.rpm || 40} rpm`;
+      setHighlightedHeartTarget(state.supporter);
       if (attackEl) attackEl.innerText = state.success
         ? '協力サポート成功：10 RPMへ段階的に減速中'
         : '協力サポート挑戦中：ノルマ到達で回転が落ち着きます';
@@ -888,19 +949,25 @@ async function refreshCurrentTarget() {
       const selectedExtreme = extreme ? ` / 採用: ${extreme}` : '';
       usedEl.innerText = `利用中の心拍: ${target || '未設定'}${selectedExtreme} / 回転速度: ${speed} / 回転方向: ${direction}`;
     }
+    const highlightDifference = ['highest_diff', 'lowest_diff', 'random_diff'].includes(controlMode)
+      && info.mode === controlMode;
+    setHighlightedHeartTarget(highlightDifference ? target : null);
     const referenceEl = document.getElementById('comparison-reference');
     if (referenceEl) {
-      const references = info.reference_heartbeats || {};
-      const sourceLabel = info.reference_source === 'turn_start' ? 'ターン交代時の心拍' : '平均値';
+      const references = info.mode === controlMode ? { ...(info.reference_heartbeats || {}) } : {};
+      if (info.mode === controlMode && !Object.keys(references).length && target && info.reference_bpm != null) {
+        references[target] = info.reference_bpm;
+      }
+      const sourceLabel = info.reference_source === 'turn_start' ? 'このターン開始時の心拍' : '平均心拍';
       const lines = Object.entries(references)
         .sort(([firstWatch], [secondWatch]) => firstWatch.localeCompare(secondWatch))
         .map(([watchId, heartbeat]) => {
-          const bpm = Number(heartbeat);
+          const bpm = heartbeat == null ? NaN : Number(heartbeat);
           return Number.isFinite(bpm) ? `${watchId}: ${Math.round(bpm)} BPM` : `${watchId}: 未設定`;
         });
       referenceEl.innerText = lines.length
-        ? `比較の参考心拍 (${sourceLabel})\n${lines.join('\n')}`
-        : '比較の参考心拍: 未設定';
+        ? `回転基準の心拍数（${sourceLabel}）\n${lines.join('\n')}`
+        : '回転基準の心拍数: 取得待ち';
     }
     const attackEl = document.getElementById('attack-status');
     const attackDetailsEl = document.getElementById('attack-details');
@@ -1620,7 +1687,7 @@ async function restoreBaselineStatus() {
       const avg = Math.round(data[key]);
       const elem = document.getElementById(`baseline-${key}`);
       if (elem) {
-        elem.innerText = `${key} の平均値: ${avg} BPM`;
+        elem.innerText = `${key} の平均値: ${Math.round(avg)} BPM`;
       }
     }
   } catch (e) {

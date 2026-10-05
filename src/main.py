@@ -24,7 +24,7 @@ from score_logic import (
     turn_scoring_targets,
 )
 
-from heart_api import heart_api
+from heart_api import heart_api, clear_heart_state
 from turn_api import turn_api
 from id_api import id_api, registration_lock
 from flask import send_file, jsonify
@@ -1223,6 +1223,8 @@ def reset_server():
         save_json_file(ASSIGNED_FILE, {})
         clients.clear()
 
+    save_json_file(GAME_STATUS_FILE, {"running": False, "game_over": False, "baseline_mode": False})
+    clear_heart_state()
     save_json_file(DATA_FILE, {})
     save_json_file(CSV_HISTORY_FILE, [], log=False)
     save_json_file(GAME_STATUS_FILE, {
@@ -1237,6 +1239,12 @@ def reset_server():
     save_json_file(JENGA_SERIES_FILE, {}, log=False)
     save_json_file(COOP_FILE, {}, log=False)
     save_json_file(CONTROL_FILE, {"mode": "self_fast"})
+    save_json_file(ROTATION_SETTINGS_FILE, {"direction": "auto", "hold": True}, log=False)
+    save_json_file(ROTATION_STATUS_FILE, {}, log=False)
+    save_manual_rotation({"enabled": False, "rpm": 10, "mode": "c", "direction": "c"})
+    if os.path.exists(LIVE_CSV_FILE):
+        with open(LIVE_CSV_FILE, "w", encoding="utf-8"):
+            pass
     reset_attack_cycle_state()
     save_attack_round({"used_attackers": [], "seen_turns": [], "last_turn": None, "completed": False})
 

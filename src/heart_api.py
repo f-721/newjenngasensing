@@ -26,6 +26,16 @@ SCORES_FILE = os.path.join(BASE_DIR, "scores.json")
 latest_timestamps = {}
 # 最後に保存した heartbeat（補完用）
 latest_heartbeats = {}
+heart_state_lock = threading.RLock()
+
+def clear_heart_state():
+    """Clear persisted heart data and the values used for automatic filling."""
+    with heart_state_lock:
+        latest_timestamps.clear()
+        latest_heartbeats.clear()
+        save_json_file(DATA_FILE, {})
+        save_json_file(HISTORY_FILE, {})
+
 
 def is_game_running():
     status = load_json_file(GAME_FILE)
@@ -129,51 +139,52 @@ def append_game_csv_heart(device_id, heartbeat, timestamp):
 # ----------------------------------------
 @heart_api.route('/heart', methods=['POST'])
 def post_heart():
-    try:
-        game = load_json_file(GAME_FILE)
+    with heart_state_lock:
+        try:
+            game = load_json_file(GAME_FILE)
 
-        if not game.get("running", False) and not game.get("baseline_mode", False):
-            print("[ALLOW] ゲーム停止中でもPOST許可")
+            if not game.get("running", False) and not game.get("baseline_mode", False):
+                print("[ALLOW] ゲーム停止中でもPOST許可")
 
-        data = request.get_json(force=True)
-        device_id = data.get('device_id')
-        heartbeat = data.get("data", {}).get("heartbeat")
+            data = request.get_json(force=True)
+            device_id = data.get('device_id')
+            heartbeat = data.get("data", {}).get("heartbeat")
 
-        if not device_id or heartbeat is None:
-            return jsonify({"status": "error", "message": "invalid data"}), 400
+            if not device_id or heartbeat is None:
+                return jsonify({"status": "error", "message": "invalid data"}), 400
 
-        timestamp = int(time.time() * 1000)
+            timestamp = int(time.time() * 1000)
 
-        # 保存処理
-        data_file = load_json_file(DATA_FILE)
-        data_file.setdefault(device_id, []).append({
-            "timestamp": timestamp,
-            "heartbeat": heartbeat
-        })
-        save_json_file(DATA_FILE, data_file)
+            # 保存処理
+            data_file = load_json_file(DATA_FILE)
+            data_file.setdefault(device_id, []).append({
+                "timestamp": timestamp,
+                "heartbeat": heartbeat
+            })
+            save_json_file(DATA_FILE, data_file)
 
-        # ヒストリも保存
-        history = load_json_file(HISTORY_FILE)
-        history.setdefault(device_id, []).append({
-            "time": timestamp,
-            "bpm": heartbeat
-        })
-        history[device_id] = history[device_id][-30:]
-        save_json_file(HISTORY_FILE, history)
+            # ヒストリも保存
+            history = load_json_file(HISTORY_FILE)
+            history.setdefault(device_id, []).append({
+                "time": timestamp,
+                "bpm": heartbeat
+            })
+            history[device_id] = history[device_id][-30:]
+            save_json_file(HISTORY_FILE, history)
 
-        append_game_csv_heart(device_id, heartbeat, timestamp)
+            append_game_csv_heart(device_id, heartbeat, timestamp)
 
-        print(f"[{datetime.now()}] 🔴 保存: {device_id}, BPM={heartbeat}, timestamp={timestamp}")
+            print(f"[{datetime.now()}] 🔴 保存: {device_id}, BPM={heartbeat}, timestamp={timestamp}")
 
-        # 補完用データ更新
-        latest_timestamps[device_id] = timestamp
-        latest_heartbeats[device_id] = heartbeat
+            # 補完用データ更新
+            latest_timestamps[device_id] = timestamp
+            latest_heartbeats[device_id] = heartbeat
 
-        return jsonify({"status": "ok"})
+            return jsonify({"status": "ok"})
 
-    except Exception as e:
-        print("POST /heart error:", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        except Exception as e:
+            print("POST /heart error:", e)
+            return jsonify({"status": "error", "message": str(e)}), 500
 
 # ----------------------------------------
 # 🟡 自動補完スレッド（1秒間POSTが来ない場合）
@@ -181,38 +192,39 @@ def post_heart():
 def auto_fill_thread():
     while True:
         time.sleep(1)
-        now = int(time.time() * 1000)
+        with heart_state_lock:
+            now = int(time.time() * 1000)
 
-        game = load_json_file(GAME_FILE)
+            game = load_json_file(GAME_FILE)
 
-        running = game.get("running", False)
-        baseline = game.get("baseline_mode", False)
+            running = game.get("running", False)
+            baseline = game.get("baseline_mode", False)
 
-        # ❗ゲーム中 or baseline取得中以外は補完しないだけ
-        if not running and not baseline:
-            continue
+            # ❗ゲーム中 or baseline取得中以外は補完しないだけ
+            if not running and not baseline:
+                continue
 
-        # iterate over a snapshot to avoid RuntimeError if another thread updates the dict
-        for device_id, last_ts in list(latest_timestamps.items()):
-            diff = now - last_ts
+            # iterate over a snapshot to avoid RuntimeError if another thread updates the dict
+            for device_id, last_ts in list(latest_timestamps.items()):
+                diff = now - last_ts
 
-            if diff >= 1000:
-                heartbeat = latest_heartbeats.get(device_id)
-                if heartbeat is None:
-                    continue
+                if diff >= 1000:
+                    heartbeat = latest_heartbeats.get(device_id)
+                    if heartbeat is None:
+                        continue
 
-                fake_ts = now
+                    fake_ts = now
 
-                data_file = load_json_file(DATA_FILE)
-                data_file.setdefault(device_id, []).append({
-                    "timestamp": fake_ts,
-                    "heartbeat": heartbeat
-                })
-                save_json_file(DATA_FILE, data_file)
+                    data_file = load_json_file(DATA_FILE)
+                    data_file.setdefault(device_id, []).append({
+                        "timestamp": fake_ts,
+                        "heartbeat": heartbeat
+                    })
+                    save_json_file(DATA_FILE, data_file)
 
-                latest_timestamps[device_id] = fake_ts
+                    latest_timestamps[device_id] = fake_ts
 
-                print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}")
+                    print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}")
                 
 # スレッド起動（アプリ起動時に1回だけ実行）
 threading.Thread(target=auto_fill_thread, daemon=True).start()

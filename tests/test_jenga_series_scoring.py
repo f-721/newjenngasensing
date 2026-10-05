@@ -77,3 +77,25 @@ def test_final_ranking_uses_total_score_before_interference_results():
     ranking = calculate_final_ranking(scores, WATCHES)
 
     assert [entry["watch_id"] for entry in ranking] == ["watch1", "watch2", "watch3"]
+
+
+def test_final_ranking_equal_totals_share_rank_despite_different_score_components():
+    scores = {
+        "watch1": {"survival_score": 2},
+        "watch2": {"interference_score": 2},
+        "watch3": {"ranking_bonus": 1},
+    }
+    ranking = calculate_final_ranking(scores, list(reversed(WATCHES)))
+    assert [(entry["watch_id"], entry["rank"]) for entry in ranking] == [
+        ("watch1", 1), ("watch2", 1), ("watch3", 3)
+    ]
+
+
+def test_final_ranking_all_zero_scores_share_first_place():
+    assert [entry["rank"] for entry in calculate_final_ranking({}, WATCHES)] == [1, 1, 1]
+
+
+def test_final_ranking_ties_below_first_place():
+    scores = {"watch1": {"survival_score": 2}, "watch2": {"survival_score": 1},
+              "watch3": {"interference_score": 1}}
+    assert [entry["rank"] for entry in calculate_final_ranking(scores, WATCHES)] == [1, 2, 2]

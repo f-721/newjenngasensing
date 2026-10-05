@@ -224,24 +224,22 @@ def calculate_interference_ranking(attack_events, watch_ids):
 
 
 def calculate_final_ranking(scores, watch_ids):
+    """Rank equal total scores equally (1, 1, 3 competition ranking)."""
     normalized = normalize_series_scores(scores, watch_ids)
     ordered = sorted(
         normalized,
-        key=lambda watch_id: (
-            -normalized[watch_id]["total_score"],
-            -normalized[watch_id]["survival_score"],
-            -normalized[watch_id]["interference_score"],
-            watch_id,
-        ),
+        key=lambda watch_id: (-normalized[watch_id]["total_score"], watch_id),
     )
-    return [
-        {
-            "watch_id": watch_id,
-            "rank": index + 1,
-            "total_score": normalized[watch_id]["total_score"],
-        }
-        for index, watch_id in enumerate(ordered)
-    ]
+    ranking = []
+    previous_score = None
+    rank = 0
+    for index, watch_id in enumerate(ordered):
+        total_score = normalized[watch_id]["total_score"]
+        if total_score != previous_score:
+            rank = index + 1
+        ranking.append({"watch_id": watch_id, "rank": rank, "total_score": total_score})
+        previous_score = total_score
+    return ranking
 
 
 def calculate_set_score(scores, watch_ids, collapsed_player, attack_events, scoring_mode):

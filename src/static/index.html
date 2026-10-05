@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>心拍数モニター</title>
-  <link rel="stylesheet" href="/static/styles.css?v=watch-number-5">
+  <link rel="stylesheet" href="/static/styles.css?v=heart-underline-12">
 </head>
 <body>
   <div class="dashboard">
@@ -37,6 +37,7 @@
             <div class="heart-info-layout">
               <div class="heart-info-status">
                 <div id="current-used" class="current-used">利用中の心拍: 未設定</div>
+                <div id="comparison-reference" class="comparison-reference" aria-live="polite">回転基準の心拍数: 取得待ち</div>
                 <div id="attack-status" class="current-used">妨害情報: 取得中...</div>
               </div>
               <section class="card status-summary-card heart-info-average" aria-labelledby="average-heading">
@@ -76,6 +77,6 @@
   <a href="/babanuki.html" class="mini-link-btn">ババ抜き画面へ</a>
   <div id="mode-banner" class="mode-banner"></div>
 
-  <script src="/static/app.js?v=watch-number-5"></script>
+  <script src="/static/app.js?v=heart-underline-12"></script>
 </body>
 </html>

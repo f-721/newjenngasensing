@@ -1,13 +1,17 @@
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import main
 import id_api as id_api_module
+import heart_api as heart_api_module
 
 
 def configure_reset_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(heart_api_module, "DATA_FILE", str(tmp_path / "DATA_FILE.json"))
+    monkeypatch.setattr(heart_api_module, "HISTORY_FILE", str(tmp_path / "heart_history.json"))
     for name in (
         "ASSIGNED_FILE",
         "DATA_FILE",
@@ -28,6 +32,7 @@ def configure_reset_files(monkeypatch, tmp_path):
         "CONTROL_FILE",
         "ATTACK_SCORING_FILE",
         "LIVE_CSV_FILE",
+        "MANUAL_ROTATION_FILE",
     ):
         monkeypatch.setattr(main, name, str(tmp_path / f"{name}.json"))
 
@@ -133,3 +138,26 @@ def test_register_assigns_first_free_id_and_enforces_four_watch_limit(monkeypatc
     fifth = client.post("/register", environ_base={"REMOTE_ADDR": "ip5"})
     assert assigned_ids == ["watch1", "watch2", "watch3", "watch4"]
     assert fifth.status_code == 403
+
+
+def test_full_reset_clears_heart_history_and_cached_values(monkeypatch, tmp_path):
+    configure_reset_files(monkeypatch, tmp_path)
+    heart_api_module.save_json_file(heart_api_module.DATA_FILE, {"watch2": [{"heartbeat": 85}]})
+    heart_api_module.save_json_file(heart_api_module.HISTORY_FILE, {"watch2": [{"bpm": 85}]})
+    monkeypatch.setitem(heart_api_module.latest_timestamps, "watch2", 123)
+    monkeypatch.setitem(heart_api_module.latest_heartbeats, "watch2", 85)
+    main.save_json_file(main.ROTATION_STATUS_FILE, {"watch2": {"rpm": 40}}, log=False)
+    main.save_manual_rotation({"enabled": True, "rpm": 40, "mode": "a"})
+    Path(main.LIVE_CSV_FILE).write_text("old data")
+
+    response = main.app.test_client().post("/reset")
+
+    assert response.status_code == 200
+    assert heart_api_module.load_json_file(heart_api_module.DATA_FILE) == {}
+    assert heart_api_module.load_json_file(heart_api_module.HISTORY_FILE) == {}
+    assert heart_api_module.latest_timestamps == {}
+    assert heart_api_module.latest_heartbeats == {}
+    assert main.load_json_file(main.ROTATION_STATUS_FILE) == {}
+    assert main.load_rotation_settings() == {"direction": "auto", "hold": True}
+    assert main.load_manual_rotation() == {"enabled": False, "rpm": 10, "mode": "c", "direction": "c"}
+    assert Path(main.LIVE_CSV_FILE).read_text() == ""

@@ -92,3 +92,61 @@ def test_attack_challenge_uses_attack_effect_after_all_challenges_succeed():
         {"attack_mode": True, "pending_attackers": []},
         ["watch2"],
     ) is False
+
+
+
+def test_every_watch_must_complete_first_turn_before_reference_switches():
+    tracker = motor_controller.TurnReferenceTracker(["watch1", "watch2", "watch3", "watch4"])
+    for number, watch in enumerate(["watch1", "watch2", "watch3", "watch4"], 1):
+        assert tracker.update(watch, number)
+        assert tracker.use_baseline
+    assert tracker.update("watch1", 5)
+    assert not tracker.use_baseline
+
+
+def test_repeated_turns_do_not_count_as_other_watches_first_turn():
+    tracker = motor_controller.TurnReferenceTracker(["watch1", "watch2", "watch3"])
+    for number, watch in enumerate(["watch1", "watch2", "watch1", "watch2", "watch3"], 1):
+        tracker.update(watch, number)
+        assert tracker.use_baseline
+    tracker.update("watch1", 6)
+    assert not tracker.use_baseline
+
+
+def test_polling_does_not_complete_current_watch_turn():
+    tracker = motor_controller.TurnReferenceTracker(["watch1"])
+    assert tracker.update("watch1", 1)
+    assert not tracker.update("watch1", 1)
+    assert tracker.use_baseline
+    assert tracker.update("watch1", 2)
+    assert not tracker.use_baseline
+
+
+def test_new_game_resets_completed_watches():
+    tracker = motor_controller.TurnReferenceTracker(["watch1", "watch2"])
+    tracker.update("watch1", 1)
+    tracker.update("watch2", 2)
+    tracker.update("watch1", 3)
+    assert not tracker.use_baseline
+    tracker.update("watch1", 1)
+    assert tracker.use_baseline
+    assert tracker.completed == set()
+    tracker.update("watch2", 2)
+    assert tracker.use_baseline
+
+
+def test_watch3_first_turn_uses_average_even_with_large_turn_number():
+    tracker = motor_controller.TurnReferenceTracker(["watch1", "watch2", "watch3"])
+    for number, watch in enumerate(["watch1", "watch2", "watch1", "watch2", "watch3"], 10):
+        tracker.update(watch, number)
+    references, source = motor_controller.get_comparison_references(
+        tracker.use_baseline, {"watch3": 68}, {"watch3": 82}
+    )
+    assert source == "baseline"
+    assert motor_controller.calculate_rpm_fast(81 - references["watch3"]) == 30
+    tracker.update("watch1", 15)
+    references, source = motor_controller.get_comparison_references(
+        tracker.use_baseline, {"watch3": 68}, {"watch3": 82}
+    )
+    assert source == "turn_start"
+    assert motor_controller.calculate_rpm_fast(81 - references["watch3"]) == 10

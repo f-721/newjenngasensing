@@ -1178,3 +1178,46 @@ select {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Highlight the player whose turn is active, including cooperative games. */
+.heart-display-expanded #rate > .current-heart-reading.is-current-turn {
+  background: #fff4d6;
+  outline: 3px solid #b86b00;
+  outline-offset: -3px;
+}
+.current-heart-reading.is-current-turn .current-heart-value {
+  color: #9a4d00;
+}
+.current-turn-badge {
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: #9a4d00;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.heart-info-status .comparison-reference {
+  font-size: clamp(1.15rem, 1.6vw, 1.5rem);
+}
+
+/* Highlight the heartbeat source in the usage summary. */
+.heart-info-status #current-used.has-highlighted-heart-target {
+  background: #e0f7f4;
+  border-left: 6px solid #00796b;
+  color: #004d40;
+}
+.used-heart-heading {
+  display: block;
+  margin-bottom: 8px;
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
+  line-height: 1.3;
+}
+
+.current-heart-reading.uses-heartbeat .current-heart-value {
+  text-decoration-line: underline;
+  text-decoration-color: #75aaa3;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 10px;
+  text-decoration-skip-ink: none;
+}

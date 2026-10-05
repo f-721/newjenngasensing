@@ -462,14 +462,43 @@ def get_game_status():
         # 通信失敗をゲーム停止と扱うと、一瞬の失敗だけでモーターが止まる。
         return None
 
-def get_current_turn():
+def get_turn_state():
     try:
         res = requests.get(TURN_API_URL, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
-        return res.json().get("current_turn")
+        return res.json()
     except Exception as e:
         print("[ERROR] /turn取得失敗:", e)
         return None
+
+def get_current_turn():
+    state = get_turn_state()
+    return state.get("current_turn") if state else None
+
+
+class TurnReferenceTracker:
+    """Use averages until every participating watch has completed a turn."""
+
+    def __init__(self, watch_ids):
+        self.watch_ids = set(watch_ids)
+        self.completed = set()
+        self.last_turn = None
+        self.last_number = None
+        self.use_baseline = True
+
+    def update(self, current_turn, turn_number):
+        if (current_turn, turn_number) == (self.last_turn, self.last_number):
+            return False
+        if self.last_number is not None and turn_number < self.last_number:
+            self.completed.clear()
+            self.last_turn = None
+        if self.last_turn in self.watch_ids:
+            self.completed.add(self.last_turn)
+        self.use_baseline = not self.watch_ids or not self.watch_ids.issubset(self.completed)
+        self.last_turn = current_turn
+        self.last_number = turn_number
+        return True
+
 
 def get_heart_data():
     try:
@@ -811,7 +840,7 @@ def get_displayed_references(mode, current_turn, target_watch, comparison_refere
 def data_fetch_loop():
     last_turn = None
     last_info = 0
-    first_turn = True
+    reference_tracker = None
     use_baseline_reference = True
 
     while True:
@@ -845,7 +874,7 @@ def data_fetch_loop():
                     rotation_settings.clear()
 
                 last_turn = None
-                first_turn = True
+                reference_tracker = None
                 use_baseline_reference = True
                 with turn_start_heartbeats_lock:
                     turn_start_heartbeats.clear()
@@ -861,7 +890,20 @@ def data_fetch_loop():
             # baseline更新（毎秒でOK、重いなら2～3秒にしても良い）
             fetch_baselines()
 
-            current_turn = get_current_turn()
+            turn_state = get_turn_state()
+            if not turn_state or not turn_state.get("current_turn"):
+                time.sleep(1)
+                continue
+            current_turn = turn_state["current_turn"]
+            turn_number = turn_state.get("turn_number", 0)
+            if reference_tracker is None:
+                watch_ids = get_watch_ids()
+                with baseline_lock:
+                    watch_ids = watch_ids or list(baseline_cache)
+                if not watch_ids:
+                    time.sleep(1)
+                    continue
+                reference_tracker = TurnReferenceTracker(watch_ids)
             heart_data = get_heart_data()
             # heart_data が空のときは直前の成功取得データを利用して継続する
             if not heart_data:
@@ -882,8 +924,8 @@ def data_fetch_loop():
                     last_heart_data.clear()
                     last_heart_data.update(heart_data)
             # ターン変更時にだけ比較基準を固定する。
-            # 初ターンは各watchの平均値、2ターン目以降は交代時点の全watch心拍を使う。
-            if current_turn != last_turn:
+            # 全員の1巡目は平均値、2巡目以降は手番開始時の全watch心拍を使う。
+            if reference_tracker.update(current_turn, turn_number):
                 if last_turn != current_turn:
                     print(f"[TURN] {last_turn} -> {current_turn}")
 
@@ -895,10 +937,8 @@ def data_fetch_loop():
                     if last_turn in random_difference_mode_map:
                         del random_difference_mode_map[last_turn]
 
-                use_baseline_reference = first_turn
-                if first_turn:
-                    first_turn = False
-                else:
+                use_baseline_reference = reference_tracker.use_baseline
+                if not use_baseline_reference:
                     snapshot = {}
                     for watch_id, record in heart_data.items():
                         try:
@@ -1026,7 +1066,7 @@ def data_fetch_loop():
 
             # ゲーム用の基本RPM計算:
             #   raw_diff = 利用watchの現在心拍 - そのwatchの比較基準
-            # 比較基準は1ターン目が平均値、2ターン目以降がターン交代時心拍。
+            # 比較基準は全員の1巡目が平均値、2巡目以降がターン開始時心拍。
             # 下降差モードだけ符号を反転し、「どれだけ下がったか」を正の差として扱う。
             # 最後に差の絶対値を FAST_RPM_TIERS / SLOW_RPM_TIERS へ当てはめる。
             raw_diff = bpm - reference_bpm
