@@ -8,7 +8,7 @@ async function loadCoopSettings() {
   const mode = document.getElementById("coopAssignmentMode");
   if (!mode) return;
   try {
-    const response = await fetch("/coop_settings", { cache: "no-store" });
+    const response = await fetchShared("/coop_settings", { cache: "no-store" });
     const data = await response.json();
     mode.value = data.settings?.assignment_mode || "specified";
     const pairing = document.getElementById("coopPairing");
@@ -23,7 +23,7 @@ async function loadCoopSettings() {
 async function selectCoopGame() {
   const status = document.getElementById("coopSettingsStatus");
   try {
-    const response = await fetch("/select_coop_mode", {
+    const response = await fetchShared("/select_coop_mode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -48,7 +48,7 @@ async function refreshCoopModeLabel() {
   const current = document.getElementById("mode-current");
   if (!current) return;
   try {
-    const response = await fetch("/get_control_mode", { cache: "no-store" });
+    const response = await fetchShared("/get_control_mode", { cache: "no-store" });
     const data = await response.json();
     if (data.mode === "team_coop") current.innerText = "現在の設定：2対2協力モード";
   } catch (_) {
@@ -59,5 +59,5 @@ async function refreshCoopModeLabel() {
 window.addEventListener("DOMContentLoaded", () => {
   loadCoopSettings();
   refreshCoopModeLabel();
-  setInterval(refreshCoopModeLabel, 2000);
+  pollWithoutOverlap(refreshCoopModeLabel, 2000);
 });

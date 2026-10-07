@@ -120,7 +120,7 @@ def event_quota_sample_count(event):
 
 
 def calculate_state_ranking(attack_events, watch_ids):
-    """Rank players by time kept near quota, then by their average BPM error."""
+    """Rank players by time on the achieved side of the quota; equal times share rank."""
     events = successful_attack_events(attack_events, watch_ids)
     totals = {
         watch_id: {"quota_keep_ms": 0.0, "error_total": 0.0, "sample_count": 0}
@@ -139,11 +139,11 @@ def calculate_state_ranking(attack_events, watch_ids):
         return entry["error_total"] / entry["sample_count"]
 
     ordered = sorted(watch_ids, key=lambda watch_id: (
-        -totals[watch_id]["quota_keep_ms"], average_error(watch_id), watch_id
+        -totals[watch_id]["quota_keep_ms"], watch_id
     ))
     return [{
         "watch_id": watch_id,
-        "rank": index + 1,
+        "rank": 1 + sum(totals[other]["quota_keep_ms"] > totals[watch_id]["quota_keep_ms"] for other in watch_ids),
         "quota_keep_ms": int(totals[watch_id]["quota_keep_ms"]),
         "average_quota_error": None if average_error(watch_id) == float("inf") else average_error(watch_id),
     } for index, watch_id in enumerate(ordered)]
@@ -188,11 +188,13 @@ def calculate_attack_metrics(attack_events, watch_ids):
 
 
 def apply_state_bonus(scores, attack_events, watch_ids):
-    """Award +1 to the single player who kept closest to quota for longest."""
+    """Award +1 to the players with the longest achieved-side time in this set."""
     updated = normalize_series_scores(scores, watch_ids)
     ranking = calculate_state_ranking(attack_events, list(updated))
     if ranking and ranking[0]["quota_keep_ms"] > 0:
-        updated[ranking[0]["watch_id"]]["ranking_bonus"] += 1
+        for entry in ranking:
+            if entry["rank"] == 1:
+                updated[entry["watch_id"]]["ranking_bonus"] += 1
     for entry in updated.values():
         entry["total_score"] = entry["survival_score"] + entry["interference_score"] + entry["ranking_bonus"]
     return updated, ranking
@@ -269,8 +271,9 @@ def calculate_set_score(scores, watch_ids, collapsed_player, attack_events, scor
         winners = []
 
     for watch_id in winners:
-        updated[watch_id]["interference_score"] += 1
-        set_points[watch_id]["interference"] = 1
+        points = sum(1 for event in events if event["attacker"] == watch_id) if scoring_mode == "success" else 1
+        updated[watch_id]["interference_score"] += points
+        set_points[watch_id]["interference"] = points
     for entry in updated.values():
         entry["total_score"] = entry["survival_score"] + entry["interference_score"] + entry["ranking_bonus"]
     return updated, set_points, mvp
@@ -364,7 +367,7 @@ def attack_challenge_score_awards(attack_success, current_turn, scoring_mode):
         # 影響度型はターンごとの成功点を付けず、セット終了時にだけ採点する。
         return {}
     elif scoring_mode == "state":
-        # 状態管理型はゲーム終了時にシリーズ全体の維持時間から採点する。
+        # 状態管理型はセット終了時に、そのセットのノルマ達成側の時間から採点する。
         return {}
     else:
         sample = {}

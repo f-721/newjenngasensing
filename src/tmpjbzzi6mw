@@ -1,0 +1,51 @@
+{
+  "active": true,
+  "set_finished": false,
+  "game_number": 2,
+  "total_sets": 2,
+  "settings": {
+    "assignment_mode": "specified",
+    "pairing": "12_34",
+    "quota_offset": 10,
+    "initial_rpm": 40,
+    "supported_rpm": 10
+  },
+  "teams": {
+    "team_a": [
+      "watch1",
+      "watch2"
+    ],
+    "team_b": [
+      "watch3",
+      "watch4"
+    ]
+  },
+  "team_scores": {
+    "team_a": 0,
+    "team_b": 1
+  },
+  "set_history": [
+    {
+      "set": 1,
+      "collapsed_player": "watch2",
+      "collapsed_team": "team_a",
+      "scoring_team": "team_b",
+      "team_scores": {
+        "team_a": 0,
+        "team_b": 1
+      }
+    }
+  ],
+  "turn_state": {
+    "current_turn": "watch1",
+    "team_id": "team_a",
+    "supporter": "watch2",
+    "threshold": 75.75,
+    "success": true,
+    "success_timestamp": 1791261755989,
+    "heartbeat": 77.0,
+    "rpm": 10,
+    "direction": "c"
+  },
+  "winner": null
+}

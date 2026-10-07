@@ -11,6 +11,9 @@ import turn_api
 def test_next_turn_increments_turn_number(monkeypatch, tmp_path):
     turn_file = tmp_path / "turn.json"
     assigned_file = tmp_path / "assigned_ids.json"
+    game_file = tmp_path / "game_status.json"
+    monkeypatch.setattr(turn_api, "GAME_STATUS_FILE", str(game_file))
+    turn_api.save_json_file(str(game_file), {"running": True})
     monkeypatch.setattr(turn_api, "TURN_FILE", str(turn_file))
     monkeypatch.setattr(turn_api, "ASSIGNED_FILE", str(assigned_file))
     turn_api.save_json_file(str(turn_file), {

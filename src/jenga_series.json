@@ -1,14 +1,13 @@
 {
-  "series_id": "20261005_190327",
+  "series_id": "20261007_154716",
   "game_number": 1,
-  "total_sets": 2,
-  "active": true,
+  "total_sets": 1,
+  "active": false,
   "set_finished": true,
-  "scoring_mode": "success",
+  "scoring_mode": "impact",
   "watch_ids": [
     "watch1",
-    "watch2",
-    "watch3"
+    "watch2"
   ],
   "scores": {
     "watch1": {
@@ -18,31 +17,22 @@
       "total_score": 1
     },
     "watch2": {
-      "survival_score": 1,
+      "survival_score": 0,
       "interference_score": 0,
-      "ranking_bonus": 0,
-      "total_score": 1
-    },
-    "watch3": {
-      "survival_score": 1,
-      "interference_score": 0,
-      "ranking_bonus": 0,
+      "ranking_bonus": 1,
       "total_score": 1
     }
   },
   "set_history": [
     {
       "set": 1,
-      "collapsed_player": null,
+      "collapsed_player": "watch2",
       "survivors": [
-        "watch1",
-        "watch2",
-        "watch3"
+        "watch1"
       ],
       "interference_success": {
-        "watch1": 0,
-        "watch2": 0,
-        "watch3": 0
+        "watch1": 2,
+        "watch2": 3
       },
       "mvp": null,
       "set_points": {
@@ -52,14 +42,9 @@
           "ranking": 0
         },
         "watch2": {
-          "survival": 1,
+          "survival": 0,
           "interference": 0,
-          "ranking": 0
-        },
-        "watch3": {
-          "survival": 1,
-          "interference": 0,
-          "ranking": 0
+          "ranking": 1
         }
       },
       "scores": {
@@ -70,66 +55,309 @@
           "total_score": 1
         },
         "watch2": {
-          "survival_score": 1,
+          "survival_score": 0,
           "interference_score": 0,
-          "ranking_bonus": 0,
-          "total_score": 1
-        },
-        "watch3": {
-          "survival_score": 1,
-          "interference_score": 0,
-          "ranking_bonus": 0,
+          "ranking_bonus": 1,
           "total_score": 1
         }
       },
       "attack_metrics": {
         "watch1": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
+          "success_count": 2,
+          "quota_keep_ms": 16010,
+          "average_quota_error": 7.909387755102053,
+          "total_impact": 37.14285714285714,
+          "max_impact": 20.0,
+          "average_achievement_ms": 86790.5,
+          "events": [
+            {
+              "target": "watch2",
+              "turn": "watch2",
+              "direction": "up",
+              "threshold": 87.85714285714286,
+              "heartbeat": 95.0,
+              "heart_rate_width": 17.14285714285714,
+              "threshold_excess": 7.142857142857139,
+              "achievement_time_ms": 93.0,
+              "quota_keep_ms": 1225
+            },
+            {
+              "target": "watch2",
+              "turn": "watch2",
+              "direction": "up",
+              "threshold": 100.0,
+              "heartbeat": 100.0,
+              "heart_rate_width": 20.0,
+              "threshold_excess": 0.0,
+              "achievement_time_ms": 173488.0,
+              "quota_keep_ms": 14785
+            }
+          ]
         },
         "watch2": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
-        },
-        "watch3": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
+          "success_count": 3,
+          "quota_keep_ms": 19599,
+          "average_quota_error": 6.758222222222223,
+          "total_impact": 32.55555555555556,
+          "max_impact": 15.555555555555557,
+          "average_achievement_ms": 84122.0,
+          "events": [
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "up",
+              "threshold": 88.44444444444444,
+              "heartbeat": 94.0,
+              "heart_rate_width": 15.555555555555557,
+              "threshold_excess": 5.555555555555557,
+              "achievement_time_ms": 24990.0,
+              "quota_keep_ms": 0
+            },
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "down",
+              "threshold": 70.0,
+              "heartbeat": 70.0,
+              "heart_rate_width": 5.0,
+              "threshold_excess": 0.0,
+              "achievement_time_ms": 227122.0,
+              "quota_keep_ms": 10921
+            },
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "down",
+              "threshold": 83.0,
+              "heartbeat": 76.0,
+              "heart_rate_width": 12.0,
+              "threshold_excess": 7.0,
+              "achievement_time_ms": 254.0,
+              "quota_keep_ms": 8678
+            }
+          ]
         }
       },
-      "impact_winner": null
+      "impact_winner": "watch2",
+      "state_ranking": [
+        {
+          "watch_id": "watch2",
+          "rank": 1,
+          "quota_keep_ms": 19599,
+          "average_quota_error": 6.758222222222223
+        },
+        {
+          "watch_id": "watch1",
+          "rank": 2,
+          "quota_keep_ms": 16010,
+          "average_quota_error": 7.909387755102053
+        }
+      ],
+      "state_bonus_winners": [
+        "watch2"
+      ]
     }
   ],
-  "current_set_events": [],
-  "attack_events": [],
-  "final_ranking": [],
+  "current_set_events": [
+    {
+      "attacker": "watch2",
+      "timestamp": 1791355666950,
+      "signal_timestamp": 1791355641959,
+      "achievement_time_ms": 24990,
+      "impact": 15.555555555555557,
+      "heart_rate_width": 15.555555555555557,
+      "threshold_excess": 5.555555555555557,
+      "threshold": 88.44444444444444,
+      "heartbeat": 94.0,
+      "direction": "up",
+      "target": "watch1",
+      "turn": "watch1",
+      "quota_keep_ms": 0,
+      "quota_error_total": 147.77777777777777,
+      "quota_sample_count": 23
+    },
+    {
+      "attacker": "watch1",
+      "timestamp": 1791355677954,
+      "signal_timestamp": 1791355677861,
+      "achievement_time_ms": 93,
+      "impact": 17.14285714285714,
+      "heart_rate_width": 17.14285714285714,
+      "threshold_excess": 7.142857142857139,
+      "threshold": 87.85714285714286,
+      "heartbeat": 95.0,
+      "direction": "up",
+      "target": "watch2",
+      "turn": "watch2",
+      "quota_keep_ms": 1225,
+      "quota_error_total": 1086.1428571428592,
+      "quota_sample_count": 95
+    },
+    {
+      "attacker": "watch2",
+      "timestamp": 1791355943785,
+      "signal_timestamp": 1791355716662,
+      "achievement_time_ms": 227122,
+      "impact": 5.0,
+      "heart_rate_width": 5.0,
+      "threshold_excess": 0.0,
+      "threshold": 70.0,
+      "heartbeat": 70.0,
+      "direction": "down",
+      "target": "watch1",
+      "turn": "watch1",
+      "quota_keep_ms": 10921,
+      "quota_error_total": 606.0,
+      "quota_sample_count": 84
+    },
+    {
+      "attacker": "watch1",
+      "timestamp": 1791356171145,
+      "signal_timestamp": 1791355997648,
+      "achievement_time_ms": 173488,
+      "impact": 20.0,
+      "heart_rate_width": 20.0,
+      "threshold_excess": 0.0,
+      "threshold": 100.0,
+      "heartbeat": 100.0,
+      "direction": "up",
+      "target": "watch2",
+      "turn": "watch2",
+      "turn_number": 4,
+      "quota_keep_ms": 14785,
+      "quota_error_total": 298.0,
+      "quota_sample_count": 80
+    },
+    {
+      "attacker": "watch2",
+      "timestamp": 1791356228248,
+      "signal_timestamp": 1791356227994,
+      "achievement_time_ms": 254,
+      "impact": 12.0,
+      "heart_rate_width": 12.0,
+      "threshold_excess": 7.0,
+      "threshold": 83.0,
+      "heartbeat": 76.0,
+      "direction": "down",
+      "target": "watch1",
+      "turn": "watch1",
+      "turn_number": 5,
+      "quota_keep_ms": 8678,
+      "quota_error_total": 91.0,
+      "quota_sample_count": 18
+    }
+  ],
+  "attack_events": [
+    {
+      "attacker": "watch2",
+      "timestamp": 1791355666950,
+      "signal_timestamp": 1791355641959,
+      "achievement_time_ms": 24990,
+      "impact": 15.555555555555557,
+      "heart_rate_width": 15.555555555555557,
+      "threshold_excess": 5.555555555555557,
+      "threshold": 88.44444444444444,
+      "heartbeat": 94.0,
+      "direction": "up",
+      "target": "watch1",
+      "turn": "watch1",
+      "quota_keep_ms": 0,
+      "quota_error_total": 147.77777777777777,
+      "quota_sample_count": 23
+    },
+    {
+      "attacker": "watch1",
+      "timestamp": 1791355677954,
+      "signal_timestamp": 1791355677861,
+      "achievement_time_ms": 93,
+      "impact": 17.14285714285714,
+      "heart_rate_width": 17.14285714285714,
+      "threshold_excess": 7.142857142857139,
+      "threshold": 87.85714285714286,
+      "heartbeat": 95.0,
+      "direction": "up",
+      "target": "watch2",
+      "turn": "watch2",
+      "quota_keep_ms": 1225,
+      "quota_error_total": 1086.1428571428592,
+      "quota_sample_count": 95
+    },
+    {
+      "attacker": "watch2",
+      "timestamp": 1791355943785,
+      "signal_timestamp": 1791355716662,
+      "achievement_time_ms": 227122,
+      "impact": 5.0,
+      "heart_rate_width": 5.0,
+      "threshold_excess": 0.0,
+      "threshold": 70.0,
+      "heartbeat": 70.0,
+      "direction": "down",
+      "target": "watch1",
+      "turn": "watch1",
+      "quota_keep_ms": 10921,
+      "quota_error_total": 606.0,
+      "quota_sample_count": 84
+    },
+    {
+      "attacker": "watch1",
+      "timestamp": 1791356171145,
+      "signal_timestamp": 1791355997648,
+      "achievement_time_ms": 173488,
+      "impact": 20.0,
+      "heart_rate_width": 20.0,
+      "threshold_excess": 0.0,
+      "threshold": 100.0,
+      "heartbeat": 100.0,
+      "direction": "up",
+      "target": "watch2",
+      "turn": "watch2",
+      "turn_number": 4,
+      "quota_keep_ms": 14785,
+      "quota_error_total": 298.0,
+      "quota_sample_count": 80
+    },
+    {
+      "attacker": "watch2",
+      "timestamp": 1791356228248,
+      "signal_timestamp": 1791356227994,
+      "achievement_time_ms": 254,
+      "impact": 12.0,
+      "heart_rate_width": 12.0,
+      "threshold_excess": 7.0,
+      "threshold": 83.0,
+      "heartbeat": 76.0,
+      "direction": "down",
+      "target": "watch1",
+      "turn": "watch1",
+      "turn_number": 5,
+      "quota_keep_ms": 8678,
+      "quota_error_total": 91.0,
+      "quota_sample_count": 18
+    }
+  ],
+  "final_ranking": [
+    {
+      "watch_id": "watch1",
+      "rank": 1,
+      "total_score": 1
+    },
+    {
+      "watch_id": "watch2",
+      "rank": 1,
+      "total_score": 1
+    }
+  ],
   "score_history": [
     {
       "set": 1,
-      "collapsed_player": null,
+      "collapsed_player": "watch2",
       "survivors": [
-        "watch1",
-        "watch2",
-        "watch3"
+        "watch1"
       ],
       "interference_success": {
-        "watch1": 0,
-        "watch2": 0,
-        "watch3": 0
+        "watch1": 2,
+        "watch2": 3
       },
       "mvp": null,
       "set_points": {
@@ -139,14 +367,9 @@
           "ranking": 0
         },
         "watch2": {
-          "survival": 1,
+          "survival": 0,
           "interference": 0,
-          "ranking": 0
-        },
-        "watch3": {
-          "survival": 1,
-          "interference": 0,
-          "ranking": 0
+          "ranking": 1
         }
       },
       "scores": {
@@ -157,62 +380,118 @@
           "total_score": 1
         },
         "watch2": {
-          "survival_score": 1,
+          "survival_score": 0,
           "interference_score": 0,
-          "ranking_bonus": 0,
-          "total_score": 1
-        },
-        "watch3": {
-          "survival_score": 1,
-          "interference_score": 0,
-          "ranking_bonus": 0,
+          "ranking_bonus": 1,
           "total_score": 1
         }
       },
       "attack_metrics": {
         "watch1": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
+          "success_count": 2,
+          "quota_keep_ms": 16010,
+          "average_quota_error": 7.909387755102053,
+          "total_impact": 37.14285714285714,
+          "max_impact": 20.0,
+          "average_achievement_ms": 86790.5,
+          "events": [
+            {
+              "target": "watch2",
+              "turn": "watch2",
+              "direction": "up",
+              "threshold": 87.85714285714286,
+              "heartbeat": 95.0,
+              "heart_rate_width": 17.14285714285714,
+              "threshold_excess": 7.142857142857139,
+              "achievement_time_ms": 93.0,
+              "quota_keep_ms": 1225
+            },
+            {
+              "target": "watch2",
+              "turn": "watch2",
+              "direction": "up",
+              "threshold": 100.0,
+              "heartbeat": 100.0,
+              "heart_rate_width": 20.0,
+              "threshold_excess": 0.0,
+              "achievement_time_ms": 173488.0,
+              "quota_keep_ms": 14785
+            }
+          ]
         },
         "watch2": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
-        },
-        "watch3": {
-          "success_count": 0,
-          "quota_keep_ms": 0,
-          "average_quota_error": null,
-          "total_impact": 0,
-          "max_impact": 0,
-          "average_achievement_ms": null,
-          "events": []
+          "success_count": 3,
+          "quota_keep_ms": 19599,
+          "average_quota_error": 6.758222222222223,
+          "total_impact": 32.55555555555556,
+          "max_impact": 15.555555555555557,
+          "average_achievement_ms": 84122.0,
+          "events": [
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "up",
+              "threshold": 88.44444444444444,
+              "heartbeat": 94.0,
+              "heart_rate_width": 15.555555555555557,
+              "threshold_excess": 5.555555555555557,
+              "achievement_time_ms": 24990.0,
+              "quota_keep_ms": 0
+            },
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "down",
+              "threshold": 70.0,
+              "heartbeat": 70.0,
+              "heart_rate_width": 5.0,
+              "threshold_excess": 0.0,
+              "achievement_time_ms": 227122.0,
+              "quota_keep_ms": 10921
+            },
+            {
+              "target": "watch1",
+              "turn": "watch1",
+              "direction": "down",
+              "threshold": 83.0,
+              "heartbeat": 76.0,
+              "heart_rate_width": 12.0,
+              "threshold_excess": 7.0,
+              "achievement_time_ms": 254.0,
+              "quota_keep_ms": 8678
+            }
+          ]
         }
       },
-      "impact_winner": null
+      "impact_winner": "watch2",
+      "state_ranking": [
+        {
+          "watch_id": "watch2",
+          "rank": 1,
+          "quota_keep_ms": 19599,
+          "average_quota_error": 6.758222222222223
+        },
+        {
+          "watch_id": "watch1",
+          "rank": 2,
+          "quota_keep_ms": 16010,
+          "average_quota_error": 7.909387755102053
+        }
+      ],
+      "state_bonus_winners": [
+        "watch2"
+      ]
     }
   ],
   "last_set_result": {
     "set": 1,
-    "collapsed_player": null,
+    "collapsed_player": "watch2",
     "survivors": [
-      "watch1",
-      "watch2",
-      "watch3"
+      "watch1"
     ],
     "interference_success": {
-      "watch1": 0,
-      "watch2": 0,
-      "watch3": 0
+      "watch1": 2,
+      "watch2": 3
     },
     "mvp": null,
     "set_points": {
@@ -222,14 +501,9 @@
         "ranking": 0
       },
       "watch2": {
-        "survival": 1,
+        "survival": 0,
         "interference": 0,
-        "ranking": 0
-      },
-      "watch3": {
-        "survival": 1,
-        "interference": 0,
-        "ranking": 0
+        "ranking": 1
       }
     },
     "scores": {
@@ -240,47 +514,106 @@
         "total_score": 1
       },
       "watch2": {
-        "survival_score": 1,
+        "survival_score": 0,
         "interference_score": 0,
-        "ranking_bonus": 0,
-        "total_score": 1
-      },
-      "watch3": {
-        "survival_score": 1,
-        "interference_score": 0,
-        "ranking_bonus": 0,
+        "ranking_bonus": 1,
         "total_score": 1
       }
     },
     "attack_metrics": {
       "watch1": {
-        "success_count": 0,
-        "quota_keep_ms": 0,
-        "average_quota_error": null,
-        "total_impact": 0,
-        "max_impact": 0,
-        "average_achievement_ms": null,
-        "events": []
+        "success_count": 2,
+        "quota_keep_ms": 16010,
+        "average_quota_error": 7.909387755102053,
+        "total_impact": 37.14285714285714,
+        "max_impact": 20.0,
+        "average_achievement_ms": 86790.5,
+        "events": [
+          {
+            "target": "watch2",
+            "turn": "watch2",
+            "direction": "up",
+            "threshold": 87.85714285714286,
+            "heartbeat": 95.0,
+            "heart_rate_width": 17.14285714285714,
+            "threshold_excess": 7.142857142857139,
+            "achievement_time_ms": 93.0,
+            "quota_keep_ms": 1225
+          },
+          {
+            "target": "watch2",
+            "turn": "watch2",
+            "direction": "up",
+            "threshold": 100.0,
+            "heartbeat": 100.0,
+            "heart_rate_width": 20.0,
+            "threshold_excess": 0.0,
+            "achievement_time_ms": 173488.0,
+            "quota_keep_ms": 14785
+          }
+        ]
       },
       "watch2": {
-        "success_count": 0,
-        "quota_keep_ms": 0,
-        "average_quota_error": null,
-        "total_impact": 0,
-        "max_impact": 0,
-        "average_achievement_ms": null,
-        "events": []
-      },
-      "watch3": {
-        "success_count": 0,
-        "quota_keep_ms": 0,
-        "average_quota_error": null,
-        "total_impact": 0,
-        "max_impact": 0,
-        "average_achievement_ms": null,
-        "events": []
+        "success_count": 3,
+        "quota_keep_ms": 19599,
+        "average_quota_error": 6.758222222222223,
+        "total_impact": 32.55555555555556,
+        "max_impact": 15.555555555555557,
+        "average_achievement_ms": 84122.0,
+        "events": [
+          {
+            "target": "watch1",
+            "turn": "watch1",
+            "direction": "up",
+            "threshold": 88.44444444444444,
+            "heartbeat": 94.0,
+            "heart_rate_width": 15.555555555555557,
+            "threshold_excess": 5.555555555555557,
+            "achievement_time_ms": 24990.0,
+            "quota_keep_ms": 0
+          },
+          {
+            "target": "watch1",
+            "turn": "watch1",
+            "direction": "down",
+            "threshold": 70.0,
+            "heartbeat": 70.0,
+            "heart_rate_width": 5.0,
+            "threshold_excess": 0.0,
+            "achievement_time_ms": 227122.0,
+            "quota_keep_ms": 10921
+          },
+          {
+            "target": "watch1",
+            "turn": "watch1",
+            "direction": "down",
+            "threshold": 83.0,
+            "heartbeat": 76.0,
+            "heart_rate_width": 12.0,
+            "threshold_excess": 7.0,
+            "achievement_time_ms": 254.0,
+            "quota_keep_ms": 8678
+          }
+        ]
       }
     },
-    "impact_winner": null
+    "impact_winner": "watch2",
+    "state_ranking": [
+      {
+        "watch_id": "watch2",
+        "rank": 1,
+        "quota_keep_ms": 19599,
+        "average_quota_error": 6.758222222222223
+      },
+      {
+        "watch_id": "watch1",
+        "rank": 2,
+        "quota_keep_ms": 16010,
+        "average_quota_error": 7.909387755102053
+      }
+    ],
+    "state_bonus_winners": [
+      "watch2"
+    ]
   }
 }

@@ -62,12 +62,27 @@ def load_json_file(filename):
             print(f"[WARN] Invalid JSON file: {filename}")
             return {}
 
+def trim_heart_samples(data, now_ms):
+    """Keep the live buffer bounded; complete game samples remain in CSV history."""
+    cutoff = now_ms - 120_000
+    for device_id, records in data.items():
+        data[device_id] = [record for record in records if record["timestamp"] >= cutoff][-1200:]
+    return data
+
+
 def save_json_file(filename, data):
     with file_lock:
-        with open(filename, 'w') as f:
-            json.dump(data, f)
-            f.flush()
-            os.fsync(f.fileno())
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(filename),
+                                             delete=False, encoding="utf-8") as handle:
+                temporary_path = handle.name
+                json.dump(data, handle)
+                handle.flush()
+            os.replace(temporary_path, filename)
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
 
 
 def append_game_csv_heart(device_id, heartbeat, timestamp):
@@ -161,7 +176,7 @@ def post_heart():
                 "timestamp": timestamp,
                 "heartbeat": heartbeat
             })
-            save_json_file(DATA_FILE, data_file)
+            save_json_file(DATA_FILE, trim_heart_samples(data_file, timestamp))
 
             # ヒストリも保存
             history = load_json_file(HISTORY_FILE)
@@ -204,6 +219,7 @@ def auto_fill_thread():
             if not running and not baseline:
                 continue
 
+            data_file = None
             # iterate over a snapshot to avoid RuntimeError if another thread updates the dict
             for device_id, last_ts in list(latest_timestamps.items()):
                 diff = now - last_ts
@@ -215,16 +231,16 @@ def auto_fill_thread():
 
                     fake_ts = now
 
-                    data_file = load_json_file(DATA_FILE)
+                    if data_file is None:
+                        data_file = load_json_file(DATA_FILE)
                     data_file.setdefault(device_id, []).append({
                         "timestamp": fake_ts,
                         "heartbeat": heartbeat
                     })
-                    save_json_file(DATA_FILE, data_file)
-
                     latest_timestamps[device_id] = fake_ts
 
-                    print(f"[{datetime.now()}] 🟡 補完保存: {device_id}, BPM={heartbeat}")
+            if data_file is not None:
+                save_json_file(DATA_FILE, trim_heart_samples(data_file, now))
                 
 # スレッド起動（アプリ起動時に1回だけ実行）
 threading.Thread(target=auto_fill_thread, daemon=True).start()

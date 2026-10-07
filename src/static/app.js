@@ -1,12 +1,86 @@
+// Share only read-only state requests; commands always reach the server.
+const sharedStateRequests = new Map();
+const sharedStatePaths = new Set([
+  '/heart_all', '/status', '/get_control_mode', '/turn', '/clients',
+  '/scores', '/get_baselines', '/coop_status', '/jenga_series',
+  '/get_rotation_status', '/attack_status', '/get_heart_data', '/attack_scoring'
+]);
+
+async function fetchShared(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  if (method !== 'GET' || !sharedStatePaths.has(url)) {
+    sharedStateRequests.clear();
+    try { return await fetch(url, options); }
+    finally { sharedStateRequests.clear(); }
+  }
+  let entry = sharedStateRequests.get(url);
+  if (!entry || (Date.now() - entry.started >= 250 && entry.complete)) {
+    entry = { started: Date.now(), complete: false };
+    entry.promise = fetch(url, options).then(response => {
+      entry.complete = true;
+      if (!response.ok && sharedStateRequests.get(url) === entry) sharedStateRequests.delete(url);
+      return response;
+    }).catch(error => {
+      if (sharedStateRequests.get(url) === entry) sharedStateRequests.delete(url);
+      throw error;
+    });
+    sharedStateRequests.set(url, entry);
+  }
+  // Each caller consumes its own response body.
+  return (await entry.promise).clone();
+}
+
+const renderedMarkup = new WeakMap();
+function setHTMLIfChanged(element, markup) {
+  if (!element) return;
+  const previous = renderedMarkup.get(element);
+  if (previous && previous.markup === markup && previous.html === element.innerHTML) return;
+  element.innerHTML = markup;
+  renderedMarkup.set(element, { markup, html: element.innerHTML });
+}
+
+// Skip ticks while a previous refresh is still waiting for the server.
+function pollWithoutOverlap(callback, delay) {
+  let pending = false;
+  return setInterval(async () => {
+    if (pending || document.hidden) return;
+    pending = true;
+    try { await callback(); }
+    catch (error) { console.error("定期更新の通信エラー", error); }
+    finally { pending = false; }
+  }, delay);
+}
+
 let intervalId = null;
 const maxHeartRates = JSON.parse(localStorage.getItem("maxHeartRates") || "{}");
 
 const MAX_POINTS = 30;
 
-let heartDataInterval = null;
 let coopTeamByWatch = {};
 let displayedCurrentTurn = null;
 let displayedHeartTarget = null;
+
+let displayedStateTimes = null;
+
+function renderStateTimes() {
+  document.querySelectorAll('#rate > [data-watch-id]').forEach(card => {
+    let timing = card.querySelector('.state-quota-time');
+    if (!displayedStateTimes) {
+      if (timing) timing.remove();
+      return;
+    }
+    if (!timing) {
+      timing = document.createElement('div');
+      timing.className = 'state-quota-time';
+      card.appendChild(timing);
+    }
+    const entry = displayedStateTimes[card.dataset.watchId];
+    const seconds = ((entry?.quota_keep_ms || 0) / 1000).toFixed(1);
+    const text = `ノルマ達成側の時間（このセット）：${seconds} 秒${entry?.rank ? ` ／ ${entry.rank}位` : ''}`;
+    if (timing.textContent !== text) timing.textContent = text;
+    timing.classList.toggle('is-leading', Boolean(entry?.rank === 1 && entry.quota_keep_ms > 0));
+  });
+}
 
 function setHighlightedHeartTarget(watchId) {
   displayedHeartTarget = watchId || null;
@@ -42,10 +116,8 @@ function highlightCurrentTurn() {
 
 function startFetching() {
   if (intervalId !== null) return;
-  intervalId = setInterval(() => {
-    fetchHeartRate();
-    refreshCurrentTurn();
-    refreshScores();
+  intervalId = pollWithoutOverlap(async () => {
+    await Promise.all([fetchHeartRate(), refreshScores()]);
   }, 1000);
   document.getElementById('status').innerText = '状態: 取得中';
   localStorage.setItem("fetchingStatus", "running");
@@ -62,7 +134,7 @@ function stopFetching() {
 
 async function fetchHeartRate() {
   try {
-    const res = await fetch('/heart_all');
+    const res = await fetchShared('/heart_all');
     const text = await res.text();
     let data = {};
     try {
@@ -75,6 +147,17 @@ async function fetchHeartRate() {
 
     const rateContainer = document.getElementById('rate');
     const maxContainer = document.getElementById('max-rate');
+    const renderKey = JSON.stringify([
+      Object.entries(data || {}).map(([id, record]) => [id, record.heartbeat]),
+      coopTeamByWatch, maxHeartRates
+    ]);
+    if (rateContainer.dataset.renderKey === renderKey &&
+        rateContainer.childElementCount === Object.keys(data || {}).length &&
+        Object.keys(data || {}).length > 0) {
+      highlightCurrentTurn();
+      renderStateTimes();
+      return;
+    }
     rateContainer.innerHTML = '';
     if (maxContainer) maxContainer.innerHTML = '';
 
@@ -120,7 +203,12 @@ async function fetchHeartRate() {
         }
       }
 
+      rateContainer.dataset.renderKey = JSON.stringify([
+        Object.entries(data).map(([id, record]) => [id, record.heartbeat]),
+        coopTeamByWatch, maxHeartRates
+      ]);
       highlightCurrentTurn();
+      renderStateTimes();
 
       for (const [device_id, maxBpm] of Object.entries(maxHeartRates)) {
         const div = document.createElement('div');
@@ -138,9 +226,8 @@ async function fetchHeartRate() {
 
 async function refreshGameStatus() {
   try {
-    const res = await fetch('/status', { cache: "no-store" });
+    const res = await fetchShared('/status', { cache: "no-store" });
     const data = await res.json();
-    console.log('[DEBUG] /status data:', data);
     document.getElementById('game-status').innerText = 'ゲーム状態: ' + (data.running ? '開始中' : '終了');
     await updateModeButtons(data.running);
   } catch (error) {
@@ -151,7 +238,7 @@ async function refreshGameStatus() {
 
 async function startGame() {
   try {
-    const modeRes = await fetch("/get_control_mode");
+    const modeRes = await fetchShared("/get_control_mode");
     const modeData = await modeRes.json();
     if (modeData.mode === "manual_test") {
       alert("手動テストモード中はゲームを開始できません。通常モードに戻してから開始してください");
@@ -159,7 +246,7 @@ async function startGame() {
     }
 
     const totalSets = document.getElementById("jengaSetCount").value;
-    const res = await fetch(`/start?mode=jenga&sets=${encodeURIComponent(totalSets)}`, { method: "POST" });
+    const res = await fetchShared(`/start?mode=jenga&sets=${encodeURIComponent(totalSets)}`, { method: "POST" });
     const data = await res.json();
     if (res.ok) {
       setGamePhaseBanner('ゲーム開始', 'start');
@@ -189,7 +276,7 @@ async function nextJengaGame() {
   button.disabled = true;
   let gameSwitched = false;
   try {
-    const statusRes = await fetch("/status", { cache: "no-store" });
+    const statusRes = await fetchShared("/status", { cache: "no-store" });
     const status = await statusRes.json();
     if (status.running) {
       alert("ゲーム中です。先に「終了」ボタンでゲームを終了してください");
@@ -198,7 +285,7 @@ async function nextJengaGame() {
 
     if (!confirm("現在の得点を維持して、次のゲームへ進みますか？")) return;
 
-    const res = await fetch("/next_jenga_game", { method: "POST" });
+    const res = await fetchShared("/next_jenga_game", { method: "POST" });
     const responseText = await res.text();
     let data = {};
     try {
@@ -220,8 +307,6 @@ async function nextJengaGame() {
     localStorage.removeItem("maxHeartRates");
     document.getElementById("csvBtn").style.display = "none";
     await refreshGameStatus();
-    await refreshScores();
-    await refreshJengaSeries();
     await refreshScores();
     await refreshJengaSeries();
     await refreshCurrentTurn();
@@ -300,6 +385,24 @@ function renderRankingCard(title, ranking, metric, final = false, interference =
   </section>`;
 }
 
+function renderFinalResults(ranking, teams = null) {
+  const tied = ranking.filter(item => Number(item.rank) === 1).length > 1;
+  return `<section class="final-results" aria-label="確定した最終順位と合計得点">
+    <h2>ゲーム終了・最終結果</h2>
+    <div class="final-results-columns"><span>順位</span><span>${teams ? 'チーム / 所属Watch' : 'プレイヤー'}</span><span>合計得点</span></div>
+    <ol class="final-results-list">${ranking.map(item => {
+      const name = teams
+        ? `<strong>${item.watch_id === 'team_a' ? 'チームA' : 'チームB'}</strong><small>${(teams[item.watch_id] || []).map(escapeResultText).join('・')}</small>`
+        : renderResultWatchLabel(item.watch_id);
+      return `<li class="final-results-row${Number(item.rank) === 1 ? ' winner' : ''}">
+        <span class="final-results-rank">${escapeResultText(item.rank)}<small>位${tied && Number(item.rank) === 1 ? '（同率）' : ''}</small></span>
+        <span class="final-results-player">${name}</span>
+        <strong class="final-results-score">${escapeResultText(item.total_score)}<small>点</small></strong>
+      </li>`;
+    }).join('')}</ol>
+  </section>`;
+}
+
 function rankByTotalScore(items) {
   let previousScore = null;
   let rank = 0;
@@ -330,11 +433,34 @@ function getCurrentOverallRanking(data) {
 
 async function refreshJengaSeries() {
   try {
-    const res = await fetch("/jenga_series", { cache: "no-store" });
+    const modeResponse = await fetchShared("/get_control_mode", { cache: "no-store" });
+    if (!modeResponse.ok) return;
+    const mode = (await modeResponse.json()).mode;
+    const res = await fetchShared(mode === "team_coop" ? "/coop_status" : "/jenga_series", { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
+    displayedStateTimes = mode !== "team_coop" && data.scoring_mode === "state"
+      ? Object.fromEntries((data.state_ranking || []).map(entry => [entry.watch_id, entry])) : null;
+    renderStateTimes();
     latestJengaSeries = data;
     renderSetStatus();
+    if (mode === "team_coop") {
+      const history = document.getElementById("game-score-history");
+      if (history) {
+        const complete = !data.active && data.set_finished;
+        const ranking = rankByTotalScore(Object.entries(data.team_scores || {}).map(([watch_id, total_score]) => ({ watch_id, total_score })));
+        const setCards = (data.set_history || []).map(result =>
+          `<section class="game-score-history-item set-row"><h3>SET ${escapeResultText(result.set)} 終了</h3>
+          <div>倒壊: ${escapeResultText(result.collapsed_player || "なし（終了ボタン）")}</div>
+          <div>チームA: ${Number(result.team_scores?.team_a) || 0}点 / チームB: ${Number(result.team_scores?.team_b) || 0}点</div></section>`
+        ).join('');
+        history.classList.toggle('has-final-results', Boolean(complete));
+        setHTMLIfChanged(history, complete
+          ? renderFinalResults(ranking, data.teams || {}) + `<details class="result-breakdown"><summary>各セットの結果を見る</summary><div class="result-breakdown-cards">${setCards}</div></details>`
+          : setCards);
+      }
+      return;
+    }
     const setSelector = document.getElementById("jengaSetCount");
     if (setSelector && !data.active && setSelector.value !== String(data.total_sets)) {
       setSelector.value = String(data.total_sets);
@@ -357,15 +483,20 @@ async function refreshJengaSeries() {
     const stateRanking = Array.isArray(data.state_ranking) ? data.state_ranking : [];
     const finalRanking = rankByTotalScore(Array.isArray(data.final_ranking) ? data.final_ranking : []);
     const currentRanking = getCurrentOverallRanking(data);
-    history.innerHTML = [
-      finalRanking.length ? renderRankingCard("最終総合順位", finalRanking, item => `${item.total_score}点`, true) : '',
+    history.classList.toggle('has-final-results', finalRanking.length > 0);
+    if (finalRanking.length) {
+      setHTMLIfChanged(history, renderFinalResults(finalRanking) +
+        `<details class="result-breakdown"><summary>各セットの結果・得点内訳を見る</summary><div class="result-breakdown-cards">${setCards}</div></details>`);
+      return;
+    }
+    setHTMLIfChanged(history, [
       !finalRanking.length && data.active && currentRanking.length
         ? renderRankingCard("現在の総合順位（暫定）", currentRanking, item => `${item.total_score}点`) : '',
       attackChallengeModes.has(currentControlMode) && interferenceRanking.length ? renderRankingCard("現在の妨害順位", interferenceRanking, item => `${item.success_count}回`, false, true) : '',
       data.scoring_mode === "state" && stateRanking.length
-        ? renderRankingCard("ノルマ維持順位", stateRanking, item => `${(item.quota_keep_ms / 1000).toFixed(1)}秒`) : '',
+        ? renderRankingCard("ノルマ達成側の時間順位（このセット）", stateRanking, item => `${(item.quota_keep_ms / 1000).toFixed(1)}秒`) : '',
       setCards
-    ].join("");
+    ].join(""));
   } catch (e) {
     console.error("連続ゲーム情報の取得に失敗", e);
   }
@@ -374,7 +505,7 @@ async function refreshJengaSeries() {
 async function stopGame() {
   isGameRunning = false;
   try {
-    const res = await fetch('/stop', { method: 'POST' });
+    const res = await fetchShared('/stop', { method: 'POST' });
     const data = await res.json();
     console.log('[JS] POST /stop ->', data);
 
@@ -401,7 +532,7 @@ async function stopGame() {
 async function resetServer() {
   if (!confirm("本当にリセットしますか？全データを消去します。")) return;
   try {
-    const res = await fetch('/reset', { method: 'POST' });
+    const res = await fetchShared('/reset', { method: 'POST' });
     const data = await res.json();
     if (!res.ok || data.status !== 'ok') {
       throw new Error(data.message || 'リセットに失敗しました');
@@ -435,7 +566,7 @@ async function calculateBaseline() {
   }
 
   try {
-    await fetch("/start_baseline", { method: "POST" });
+    await fetchShared("/start_baseline", { method: "POST" });
     await new Promise(r => setTimeout(r, 1000));
 
     let countdown = 10;
@@ -449,7 +580,7 @@ async function calculateBaseline() {
     baselineTimers[selectedId] = setTimeout(async () => {
       clearInterval(baselineIntervals[selectedId]);
 
-      const res = await fetch(`/calculate_baseline/${selectedId}`, {
+      const res = await fetchShared(`/calculate_baseline/${selectedId}`, {
         method: "POST"
       });
 
@@ -466,7 +597,7 @@ async function calculateBaseline() {
         resultEl.innerText = `${selectedId} の平均値取得に失敗：${data.message || data.error || 'エラー'}`;
       }
 
-      await fetch("/stop_baseline", { method: "POST" });
+      await fetchShared("/stop_baseline", { method: "POST" });
 
       delete baselineTimers[selectedId];
       delete baselineIntervals[selectedId];
@@ -505,7 +636,7 @@ async function runTurnCountdown(seconds = 5) {
   const banner = document.getElementById('turn-countdown-banner');
   if (!banner) return;
 
-  const currentTurnRes = await fetch('/turn', { cache: 'no-store' });
+  const currentTurnRes = await fetchShared('/turn', { cache: 'no-store' });
   const currentTurnData = await currentTurnRes.json();
   const currentTurn = currentTurnData.current_turn;
   if (!currentTurn) {
@@ -533,11 +664,32 @@ async function runTurnCountdown(seconds = 5) {
   }, 1000);
 }
 
+function updateCollapseWatchSelector(ids = null) {
+  const selector = document.getElementById("collapseWatchSelector");
+  if (!selector) return;
+  selector.options[0].textContent = displayedCurrentTurn
+    ? `現在の手番（自動）：${displayedCurrentTurn}` : "現在の手番（自動）";
+  if (ids === null) return;
+  const selected = selector.value;
+  const watches = [...new Set(ids)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const existing = Array.from(selector.options).slice(1).map(option => option.value);
+  if (JSON.stringify(existing) === JSON.stringify(watches)) return;
+  while (selector.options.length > 1) selector.remove(1);
+  for (const watch of watches) {
+    const option = document.createElement("option");
+    option.value = watch;
+    option.textContent = watch;
+    selector.appendChild(option);
+  }
+  selector.value = watches.includes(selected) ? selected : "";
+}
+
 async function refreshCurrentTurn() {
   try {
-    const res = await fetch('/turn');
+    const res = await fetchShared('/turn');
     const data = await res.json();
     displayedCurrentTurn = data.current_turn || null;
+    updateCollapseWatchSelector();
     highlightCurrentTurn();
     const turnNumber = Number(data.turn_number);
     const turnLabel = Number.isInteger(turnNumber) && turnNumber > 0
@@ -549,7 +701,7 @@ async function refreshCurrentTurn() {
     document.getElementById('current-turn').innerText = '今のターン: ' + display;
     document.getElementById('turn-display-large').innerText = display;
 
-    const modeRes = await fetch('/get_control_mode', { cache: 'no-store' });
+    const modeRes = await fetchShared('/get_control_mode', { cache: 'no-store' });
     const mode = (await modeRes.json()).mode;
     const gameRunning = document.getElementById('game-status').textContent.includes('開始中');
     if (mode === 'attack_challenge_wait' && gameRunning) {
@@ -570,11 +722,11 @@ async function refreshCurrentTurn() {
 
 async function refreshScores() {
   try {
-    const res = await fetch('/scores', { cache: 'no-store' });
+    const res = await fetchShared('/scores', { cache: 'no-store' });
     if (!res.ok) throw new Error('score fetch failed');
     const scores = await res.json();
     const board = document.getElementById('score-board');
-    board.innerHTML = Object.entries(scores)
+    setHTMLIfChanged(board, Object.entries(scores)
       .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
       .map(([watchId, score]) => {
         if (typeof score === "object" && score !== null) {
@@ -582,7 +734,7 @@ async function refreshScores() {
         }
         return `<div class="score-item">${renderResultWatchLabel(watchId)}: ${score}点</div>`;
       })
-      .join('');
+      .join(''));
   } catch (error) {
     console.error(error);
   }
@@ -599,9 +751,10 @@ async function refreshClientList() {
   baselineSelector.innerHTML = "";
 
   try {
-    const res = await fetch("/clients");
+    const res = await fetchShared("/clients");
     const data = await res.json();
 
+    updateCollapseWatchSelector(Object.values(data.ids));
     document.getElementById('watch-count').innerText = `接続中のデバイス数: ${data.count}`;
     for (const ip in data.ids) {
       const id = data.ids[ip];
@@ -635,7 +788,7 @@ function updateBaselineUI(device_id, avg) {
 
 async function loadBaselineToUI() {
   try {
-    const res = await fetch("/get_baselines");
+    const res = await fetchShared("/get_baselines");
     const data = await res.json();
 
     const area = document.getElementById("baseline-area");
@@ -651,7 +804,7 @@ async function loadBaselineToUI() {
 
 function setTurn() {
   const selectedId = document.getElementById("turnSelector").value;
-  fetch("/set_turn", {
+  fetchShared("/set_turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ current_turn: selectedId })
@@ -667,11 +820,11 @@ function setTurn() {
 
 async function nextTurn() {
   try {
-    const modeRes = await fetch('/get_control_mode', { cache: 'no-store' });
+    const modeRes = await fetchShared('/get_control_mode', { cache: 'no-store' });
     const mode = (await modeRes.json()).mode;
 
-    const clientRes = await fetch("/clients");
-    const turnRes = await fetch("/turn");
+    const clientRes = await fetchShared("/clients");
+    const turnRes = await fetchShared("/turn");
 
     const clients = await clientRes.json();
     const current = (await turnRes.json()).current_turn;
@@ -690,7 +843,7 @@ async function nextTurn() {
       await new Promise(resolve => setTimeout(resolve, 400));
     }
 
-    const res = await fetch("/set_turn", {
+    const res = await fetchShared("/set_turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ current_turn: nextId })
@@ -722,7 +875,7 @@ async function exportCSV() {
   }
 
   try {
-    const res = await fetch(url);
+    const res = await fetchShared(url);
 
     if (!res.ok) {
       const msg = await res.text();
@@ -755,19 +908,22 @@ async function recordCollapse() {
   const statusEl = document.getElementById("collapse-status");
 
   try {
-    const res = await fetch("/collapse", {
+    const res = await fetchShared("/collapse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: "倒壊",
-        notes: notes
+        notes: notes,
+        watch_id: document.getElementById("collapseWatchSelector")?.value || undefined
       })
     });
 
     const data = await res.json();
 
     if (res.ok) {
-      statusEl.innerText = data.series_complete ? "✓ 最終セットを確定しました" : "✓ セット得点を確定しました。次セットへ進めます";
+      const collapseSelector = document.getElementById("collapseWatchSelector");
+      if (collapseSelector) collapseSelector.value = "";
+      statusEl.innerText = `${data.watch_id} の倒壊を記録しました。` + (data.series_complete ? "✓ 最終セットを確定しました" : "✓ セット得点を確定しました。次セットへ進めます");
       statusEl.style.color = "#4caf50";
       document.getElementById("collapseNotes").value = "";
       await refreshScores();
@@ -780,7 +936,7 @@ async function recordCollapse() {
         statusEl.innerText = "";
       }, 3000);
     } else {
-      statusEl.innerText = "✗ 記録に失敗しました";
+      statusEl.innerText = `✗ ${data.message || "記録に失敗しました"}`;
       statusEl.style.color = "#f44336";
     }
   } catch (error) {
@@ -807,18 +963,18 @@ window.onload = async () => {
   await loadCurrentRotationDirection();
   await loadCurrentRotationHold();
   await updateModeButtons();
-  setInterval(updateModeButtons, 2000);
-  setInterval(refreshGameStatus, 2000);
-  setInterval(refreshCurrentTurn, 1000);
+  pollWithoutOverlap(updateModeButtons, 2000);
+  pollWithoutOverlap(refreshGameStatus, 2000);
+  pollWithoutOverlap(refreshCurrentTurn, 1000);
   // 管理画面で変更したSET情報と得点方式を、両画面へ定期反映する。
-  setInterval(refreshJengaSeries, 1000);
-  setInterval(loadAttackScoring, 1000);
+  pollWithoutOverlap(refreshJengaSeries, 1000);
+  pollWithoutOverlap(loadAttackScoring, 1000);
   // 定期的に現在モードとベースラインを取得して、別画面での変更を即時反映する
-  setInterval(loadCurrentMode, 1500);
-  setInterval(loadBaselineToUI, 3000);
+  pollWithoutOverlap(loadCurrentMode, 1500);
+  pollWithoutOverlap(loadBaselineToUI, 3000);
 
   window.addEventListener("load", async () => {
-    const res = await fetch("/get_baselines");
+    const res = await fetchShared("/get_baselines");
     const data = await res.json();
 
     for (const device in data) {
@@ -842,7 +998,7 @@ window.onload = async () => {
   await loadManualRotationStatus();
 
   try {
-    const res = await fetch('/status');
+    const res = await fetchShared('/status');
     const status = await res.json();
     if (status.running) {
       isGameRunning = true;
@@ -856,7 +1012,7 @@ window.onload = async () => {
 
 async function refreshCurrentTarget() {
   try {
-    const resTurn = await fetch('/turn');
+    const resTurn = await fetchShared('/turn');
     const turn = await resTurn.json();
     const current = turn.current_turn;
     displayedCurrentTurn = current || null;
@@ -872,11 +1028,11 @@ async function refreshCurrentTarget() {
       return;
     }
 
-    const modeResponse = await fetch('/get_control_mode', { cache: 'no-store' });
+    const modeResponse = await fetchShared('/get_control_mode', { cache: 'no-store' });
     const controlMode = (await modeResponse.json()).mode;
     if (controlMode === 'team_coop') {
       if (referenceDisplay) referenceDisplay.innerText = '協力モード：サポート成功に応じて回転速度が変わります';
-      const coopResponse = await fetch('/coop_status', { cache: 'no-store' });
+      const coopResponse = await fetchShared('/coop_status', { cache: 'no-store' });
       const coop = await coopResponse.json();
       const teams = coop.teams || {};
       coopTeamByWatch = {};
@@ -891,11 +1047,14 @@ async function refreshCurrentTarget() {
           <div class="coop-team-card coop-team-b"><strong>チームB</strong><span>${(teams.team_b || []).join('・') || '未設定'}</span><b>${coop.team_scores?.team_b || 0}点</b></div>`;
       }
       const state = coop.turn_state || {};
+      const isDown = state.phase === 'down';
+      const phaseClass = isDown ? 'challenge-direction-down' : 'challenge-direction-up';
+      const phaseLabel = isDown ? '下げよう' : '上げよう';
       const heartbeat = Number(state.heartbeat);
       const threshold = Number(state.threshold);
       const hasHeartbeat = state.heartbeat != null && Number.isFinite(heartbeat);
       const hasThreshold = state.threshold != null && Number.isFinite(threshold);
-      const remaining = hasHeartbeat && hasThreshold ? Math.max(0, threshold - heartbeat) : null;
+      const remaining = hasHeartbeat && hasThreshold ? Math.max(0, isDown ? heartbeat - threshold : threshold - heartbeat) : null;
       const status = state.success ? '達成' : '挑戦中';
       const statusClass = state.success ? 'status-success' : 'status-pending';
       const attackEl = document.getElementById('attack-status');
@@ -908,17 +1067,17 @@ async function refreshCurrentTarget() {
         ? '協力サポート成功：10 RPMへ段階的に減速中'
         : '協力サポート挑戦中：ノルマ到達で回転が落ち着きます';
       if (details) details.innerHTML = `
-        <div class="challenge-heading"><h3>協力サポート</h3><span class="challenge-direction-up">▲ 心拍数を上げよう</span></div>
+        <div class="challenge-heading"><h3>協力サポート</h3><span class="${phaseClass}">${isDown ? "▼" : "▲"} 心拍数を${phaseLabel}</span></div>
         <div class="challenge-players">
-          <article class="challenge-player ${statusClass}">
+          <article class="challenge-player ${statusClass} challenge-phase-${isDown ? 'down' : 'up'}">
             <div class="challenge-player-heading"><strong>${state.supporter || 'サポート役未設定'}</strong>
               <span class="attack-status-badge ${statusClass}">${status}</span></div>
             <div class="challenge-goal-row">
-              <div class="challenge-goal"><span>目標心拍数（ノルマ）</span><strong>${hasThreshold ? `${Math.ceil(threshold)} <small>BPM 以上</small>` : '未設定'}</strong></div>
-              <div class="challenge-direction-cue challenge-direction-up"><span class="challenge-big-arrow" aria-hidden="true"></span><strong>上げよう</strong></div>
+              <div class="challenge-goal"><span>目標心拍数（ノルマ）</span><strong>${hasThreshold ? `${isDown ? Math.floor(threshold) : Math.ceil(threshold)} <small>BPM ${isDown ? "以下" : "以上"}</small>` : '未設定'}</strong></div>
+              <div class="challenge-direction-cue ${phaseClass}"><span class="challenge-big-arrow" aria-hidden="true"></span><strong>${phaseLabel}</strong></div>
             </div>
             <div class="challenge-current"><span>現在の心拍数</span><strong>${hasHeartbeat ? `${Math.round(heartbeat)} <small>BPM</small>` : '未取得'}</strong></div>
-            <p class="challenge-guidance">${state.success ? 'サポート成功！回転がゆっくりになります' : remaining == null ? '心拍数・ノルマの取得を待っています' : `あと ${Math.ceil(remaining)} BPM 上げよう`}</p>
+            <p class="challenge-guidance">${state.success ? 'サポート成功！回転がゆっくりになります' : remaining == null ? '心拍数・ノルマの取得を待っています' : `あと ${Math.ceil(remaining)} BPM ${phaseLabel}`}</p>
           </article>
         </div>`;
       return;
@@ -931,7 +1090,7 @@ async function refreshCurrentTarget() {
       teamDisplay.innerHTML = '';
     }
 
-    const res = await fetch('/get_rotation_status');
+    const res = await fetchShared('/get_rotation_status');
     const data = await res.json();
     const info = data[current] || {};
     const target = info.target_watch || info.target || '';
@@ -972,19 +1131,17 @@ async function refreshCurrentTarget() {
     const attackEl = document.getElementById('attack-status');
     const attackDetailsEl = document.getElementById('attack-details');
     if (attackEl && attackDetailsEl) {
-      const attackRes = await fetch('/attack_status');
+      const attackRes = await fetchShared('/attack_status');
       const attackData = await attackRes.json();
       const activeAttackers = Array.isArray(attackData.attackers) ? attackData.attackers : attackers;
       const pending = Array.isArray(attackData.pending_attackers) ? attackData.pending_attackers : [];
       const conditionNames = { up: '上昇', down: '下降' };
 
-      const bannerEl = document.getElementById('attack-banner');
       if (!attackData.attack_mode) {
         attackEl.innerText = activeAttackers.length
           ? `妨害情報：現在参加 ${activeAttackers.join(', ')} (${activeAttackers.length}台)`
           : '妨害情報：現在参加 なし (0台)';
         attackDetailsEl.innerHTML = '';
-        if (bannerEl) bannerEl.style.display = 'none';
         return;
       }
 
@@ -993,12 +1150,6 @@ async function refreshCurrentTarget() {
 
       // Header summary
       attackEl.innerText = `妨害情報：現在参加 ${participants.length ? participants.join(', ') : 'なし'} (${participants.length}台) / 条件：${conditionNames[attackData.challenge_direction] || '未設定'}`;
-
-      // Keep the main banner hidden; the detailed numeric table remains the user-facing indicator.
-      if (bannerEl) {
-        bannerEl.style.display = 'none';
-        bannerEl.innerHTML = '';
-      }
 
       const expandedChallenge = Boolean(attackDetailsEl.closest('.heart-display-expanded'));
       const escapeChallengeText = (value) => String(value).replace(/[&<>"']/g, char => ({
@@ -1044,16 +1195,17 @@ async function refreshCurrentTarget() {
           const goal = hasGoal
             ? `${directionKey === 'down' ? Math.floor(threshold) : Math.ceil(threshold)} <small>BPM ${directionKey === 'down' ? '以下' : '以上'}</small>`
             : '未設定';
-          const guidance = status === '達成' ? 'チャレンジ達成！'
+          const guidance = status === '達成' ? 'このターンのチャレンジは達成済みです'
             : remaining === null ? '心拍数・ノルマの取得を待っています'
             : remaining === 0 ? '目標に到達しています'
             : `あと ${Math.ceil(remaining)} BPM <strong class="${directionClass}">${directionText}</strong>`;
-          return `<article class="challenge-player ${statusClass}">
+          return `<article class="challenge-player ${statusClass}${directionKnown ? ` challenge-phase-${directionKey}` : ''}">
             <div class="challenge-player-heading"><strong>${escapeChallengeText(watchId)}</strong>
-              <span class="attack-status-badge ${statusClass}">${escapeChallengeText(status)}</span></div>
+              <span class="attack-status-badge ${statusClass}">${status === '達成' ? '✓ 達成済み' : escapeChallengeText(status)}</span></div>
+            ${status === '達成' ? '<div class="challenge-achieved-label"><span aria-hidden="true">✓</span> チャレンジ達成！</div>' : ''}
             <div class="challenge-goal-row">
               <div class="challenge-goal"><span>目標心拍数（ノルマ）</span><strong>${goal}</strong></div>
-              ${directionKnown ? `<div class="challenge-direction-cue ${directionClass}">
+              ${directionKnown && status !== '達成' ? `<div class="challenge-direction-cue ${directionClass}">
                 <span class="challenge-big-arrow" aria-hidden="true"></span>
                 <strong>${directionText}</strong>
               </div>` : ''}
@@ -1065,13 +1217,13 @@ async function refreshCurrentTarget() {
         }
 
         return `
-          <tr>
+          <tr class="${statusClass}">
             <td class="arrow-cell"><span class="attack-arrow small ${arrowClass}">${arrowGlyph}</span></td>
-            <td><strong>${watchId}</strong></td>
+            <td><strong>${escapeChallengeText(watchId)}</strong></td>
             <td class="value-${currentTrend}">${currentCell}</td>
             <td class="reference-cell">${referenceCell}</td>
             <td class="value-${directionKey}">${thresholdCell}</td>
-            <td><span class="attack-status-badge ${statusClass}">${status}</span></td>
+            <td><span class="attack-status-badge ${statusClass}">${status === '達成' ? '✓ 達成済み' : escapeChallengeText(status)}</span></td>
           </tr>
         `;
       }).join('\n');
@@ -1093,17 +1245,17 @@ async function refreshCurrentTarget() {
           </tbody>
         </table>
       `;
-      attackDetailsEl.innerHTML = expandedChallenge
+      setHTMLIfChanged(attackDetailsEl, expandedChallenge
         ? `<div class="challenge-heading"><h3>妨害チャレンジ</h3><span class="${attackData.challenge_direction === 'down' ? 'challenge-direction-down' : attackData.challenge_direction === 'up' ? 'challenge-direction-up' : ''}">${attackData.challenge_direction === 'down' ? '▼ 心拍数を下げよう' : attackData.challenge_direction === 'up' ? '▲ 心拍数を上げよう' : '条件を設定してください'}</span></div>
            <div class="challenge-players">${rows || '<p class="challenge-empty">参加者を待っています</p>'}</div>`
-        : tableHtml;
+        : tableHtml);
     }
   } catch (e) {
     console.error('refreshCurrentTarget failed', e);
   }
 }
 
-setInterval(refreshCurrentTarget, 1000);
+pollWithoutOverlap(refreshCurrentTarget, 1000);
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
@@ -1113,12 +1265,9 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-let fetchHeartDataIntervalId = null;
-
 function startHeartDataLoop() {
   if (!document.getElementById("graph-area")) return;
-  if (heartDataInterval) return;
-  heartDataInterval = setInterval(fetchHeartData, 1000);
+  startPlotting();
 }
 
 document.addEventListener('keydown', async (event) => {
@@ -1202,7 +1351,7 @@ function createGraph(watchId) {
 async function fetchHeartData() {
   if (!isGameRunning || !document.getElementById("graph-area")) return;
 
-  const response = await fetch('/get_heart_data');
+  const response = await fetchShared('/get_heart_data');
   const data = await response.json();
 
   const now = Date.now();
@@ -1217,14 +1366,14 @@ async function fetchHeartData() {
     }));
 
     chart.data.datasets[0].data = bpmData;
-    chart.update();
+    chart.update("none");
   });
 }
 
 async function setupGraphs() {
   if (!document.getElementById("graph-area")) return;
   try {
-    const res = await fetch('/clients');
+    const res = await fetchShared('/clients');
     const data = await res.json();
     watchIds = Object.values(data.ids);
     const container = document.getElementById("graph-area");
@@ -1257,31 +1406,7 @@ function startPlotting() {
   if (!document.getElementById("graph-area")) return;
   if (plotInterval) clearInterval(plotInterval);
 
-  plotInterval = setInterval(async () => {
-    if (!isGameRunning) return;
-
-    const response = await fetch("/get_heart_data");
-    const data = await response.json();
-
-    const now = Date.now();
-    const past30s = now - 30000;
-
-    for (const watchId in data) {
-      const chart = charts[watchId];
-      if (!chart) continue;
-
-      const filtered = data[watchId].filter(r => r.timestamp >= past30s);
-      const baseTime = filtered.length > 0 ? filtered[0].timestamp : now;
-
-      chart.data.labels = filtered.map(r => ((now - r.timestamp) / 1000).toFixed(0));
-      chart.data.datasets[0].data = filtered.map(r => ({
-        x: ((now - r.timestamp) / 1000),
-        y: r.heartbeat
-      }));
-
-      chart.update();
-    }
-  }, 1000);
+  plotInterval = pollWithoutOverlap(fetchHeartData, 1000);
 }
 
 function stopPlotting() {
@@ -1308,7 +1433,7 @@ function updateChart(watchId, heartbeat, timestamp) {
 
 async function setMode(mode) {
   try {
-    const resClient = await fetch("/clients");
+    const resClient = await fetchShared("/clients");
     const dataClient = await resClient.json();
     const count = dataClient.count || 0;
 
@@ -1317,7 +1442,7 @@ async function setMode(mode) {
       return;
     }
 
-    const res = await fetch("/set_control_mode", {
+    const res = await fetchShared("/set_control_mode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode })
@@ -1370,7 +1495,7 @@ function getDirectionLabel(direction) {
 
 async function setRotationDirection(direction) {
   try {
-    const res = await fetch("/set_rotation_direction", {
+    const res = await fetchShared("/set_rotation_direction", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -1395,7 +1520,7 @@ async function setRotationDirection(direction) {
 
 async function loadCurrentRotationDirection() {
   try {
-    const res = await fetch("/get_rotation_direction");
+    const res = await fetchShared("/get_rotation_direction");
     const data = await res.json();
     const label = getDirectionLabel(data.direction);
     document.getElementById("direction-current").innerText = `回転指定：${label}`;
@@ -1410,7 +1535,7 @@ function getHoldLabel(hold) {
 
 async function setRotationHold(hold) {
   try {
-    const res = await fetch("/set_rotation_hold", {
+    const res = await fetchShared("/set_rotation_hold", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({hold})
@@ -1432,7 +1557,7 @@ async function setRotationHold(hold) {
 
 async function loadCurrentRotationHold() {
   try {
-    const res = await fetch("/get_rotation_hold");
+    const res = await fetchShared("/get_rotation_hold");
     const data = await res.json();
     const label = getHoldLabel(data.hold);
     document.getElementById("hold-current").innerText = `切り替え：${label}`;
@@ -1453,14 +1578,15 @@ function showBanner(message) {
 
 async function updateModeButtons(runningOverride = null) {
   try {
-    const requests = [fetch("/clients"), fetch("/get_control_mode")];
-    if (runningOverride === null) requests.push(fetch('/status', { cache: 'no-store' }));
+    const requests = [fetchShared("/clients"), fetchShared("/get_control_mode")];
+    if (runningOverride === null) requests.push(fetchShared('/status', { cache: 'no-store' }));
     const responses = await Promise.all(requests);
     const data = await responses[0].json();
     const controlMode = (await responses[1].json()).mode;
     const running = runningOverride === null
       ? Boolean((await responses[2].json()).running)
       : Boolean(runningOverride);
+    updateCollapseWatchSelector(Object.values(data.ids || {}));
     const count = data.count || 0;
 
     const otherButtons = document.querySelectorAll(".requires-two");
@@ -1507,7 +1633,7 @@ async function updateModeButtons(runningOverride = null) {
 
 async function loadCurrentMode() {
   try {
-    const res = await fetch("/get_control_mode");
+    const res = await fetchShared("/get_control_mode");
     const data = await res.json();
     currentControlMode = data.mode;
     updateAttackScoringVisibility();
@@ -1521,7 +1647,7 @@ async function loadCurrentMode() {
 
 async function setManualRotation(rpm, mode) {
   try {
-    const res = await fetch("/set_manual_rotation", {
+    const res = await fetchShared("/set_manual_rotation", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rpm, mode, enabled: true })
@@ -1543,7 +1669,7 @@ async function setManualRotation(rpm, mode) {
 
 async function clearManualRotation() {
   try {
-    const res = await fetch("/clear_manual_rotation", { method: "POST" });
+    const res = await fetchShared("/clear_manual_rotation", { method: "POST" });
     const data = await res.json();
     if (!res.ok) {
       showBanner(data.message || "手動回転の停止に失敗しました");
@@ -1559,7 +1685,7 @@ async function clearManualRotation() {
 
 async function loadManualRotationStatus() {
   try {
-    const res = await fetch("/manual_rotation");
+    const res = await fetchShared("/manual_rotation");
     const data = await res.json();
     if (!data.enabled) {
       document.getElementById("manual-rotation-status").innerText = "手動テスト: 停止中";
@@ -1575,7 +1701,7 @@ async function loadManualRotationStatus() {
 
 function getAttackScoringLabel(mode) {
   const labels = {
-    success: "成功回数: 成功 +1点",
+    success: "成功回数: 成功1回ごとに +1点",
     impact: "影響度: セット首位 +1点",
     state: "状態管理: ノルマ維持時間1位にゲーム終了時 +1点",
     mvp: "MVP: セットMVP +1点"
@@ -1590,7 +1716,7 @@ async function loadAttackScoring() {
   if (attackScoringSaving) return;
   const requestRevision = attackScoringRevision;
   try {
-    const res = await fetch("/attack_scoring", { cache: "no-store" });
+    const res = await fetchShared("/attack_scoring", { cache: "no-store" });
     const data = await res.json();
     if (requestRevision !== attackScoringRevision || attackScoringSaving) return;
     const selector = document.getElementById("attackScoringSelector");
@@ -1608,7 +1734,7 @@ async function setAttackScoring() {
   attackScoringSaving = true;
   attackScoringRevision += 1;
   try {
-    const res = await fetch("/attack_scoring", {
+    const res = await fetchShared("/attack_scoring", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: selectedMode })
@@ -1638,7 +1764,7 @@ async function setJengaSetCount() {
   if (!selector) return;
   const selectedSets = selector.value;
   try {
-    const res = await fetch("/jenga_settings", {
+    const res = await fetchShared("/jenga_settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ total_sets: Number(selectedSets) })
@@ -1663,7 +1789,7 @@ async function resetGameOnly() {
   if (!confirm("前回ゲームのCSVデータだけを消去しますか？")) return;
 
   try {
-    const res = await fetch("/reset_game", { method: "POST" });
+    const res = await fetchShared("/reset_game", { method: "POST" });
     const data = await res.json();
 
     if (res.ok) {
@@ -1681,7 +1807,7 @@ async function resetGameOnly() {
 
 async function restoreBaselineStatus() {
   try {
-    const res = await fetch('/get_baselines');
+    const res = await fetchShared('/get_baselines');
     const data = await res.json();
     for (const key in data) {
       const avg = Math.round(data[key]);

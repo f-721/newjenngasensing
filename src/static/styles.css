@@ -710,11 +710,6 @@ select {
   display: block;
 }
 
-/* Prominent attack banner shown on index when attack challenge is active */
-.attack-banner {
-  display: none !important;
-}
-
 /* Table arrow cell */
 .attack-table td.arrow-cell,
 .attack-table th.arrow-cell { width: 72px; text-align:center; }
@@ -1081,8 +1076,8 @@ select {
 .challenge-reference { font-size: 1.1rem; font-weight: 800; color: #374151; }
 .challenge-empty { color: #4b5563; padding: 20px; }
 
-.challenge-direction-down { color: #1565c0; }
-.challenge-direction-up { color: #c62828; }
+.challenge-direction-down { color: #087fa3; }
+.challenge-direction-up { color: #c65d08; }
 
 .challenge-goal-row {
   display: flex;
@@ -1103,6 +1098,15 @@ select {
   background: #fff;
   font-size: clamp(1.4rem, 2vw, 2rem);
   font-weight: 900;
+}
+
+.challenge-direction-cue.challenge-direction-up {
+  background: #fff0dc;
+  border: 2px solid #f5ad55;
+}
+.challenge-direction-cue.challenge-direction-down {
+  background: #e0f6ff;
+  border: 2px solid #72cde9;
 }
 
 .challenge-big-arrow {
@@ -1181,12 +1185,8 @@ select {
 
 /* Highlight the player whose turn is active, including cooperative games. */
 .heart-display-expanded #rate > .current-heart-reading.is-current-turn {
-  background: #fff4d6;
   outline: 3px solid #b86b00;
   outline-offset: -3px;
-}
-.current-heart-reading.is-current-turn .current-heart-value {
-  color: #9a4d00;
 }
 .current-turn-badge {
   margin-top: 8px;
@@ -1221,3 +1221,102 @@ select {
   text-underline-offset: 10px;
   text-decoration-skip-ink: none;
 }
+
+/* The confirmed result gets a full-width scoreboard, above optional set details. */
+.game-score-history.has-final-results {
+  flex-direction: column;
+  overflow: visible;
+  gap: 16px;
+}
+.final-results {
+  padding: clamp(12px, 2vw, 20px);
+  border: 3px solid #174a83;
+  border-radius: 16px;
+  background: #fff;
+  color: #14263d;
+  text-align: left;
+}
+.final-results h2 { margin: 0 0 12px; font-size: clamp(20px, 2vw, 26px); }
+.final-results-columns, .final-results-row {
+  display: grid;
+  grid-template-columns: minmax(80px, .7fr) minmax(0, 2fr) minmax(90px, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+.final-results-columns { padding: 0 18px 10px; font-size: 16px; font-weight: 700; }
+.final-results-columns > :last-child { text-align: right; }
+.final-results-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.final-results-row { padding: 10px 14px; border: 2px solid #ced8e5; border-radius: 12px; background: #f7f9fc; }
+.final-results-row.winner { background: #fff3ce; border-color: #a46b12; }
+.final-results-rank, .final-results-score { font-size: clamp(26px, 3vw, 36px); font-weight: 900; line-height: 1.2; }
+.final-results-rank small, .final-results-score small { font-size: 18px; margin-left: 5px; }
+.final-results-score { text-align: right; color: #174a83; }
+.final-results-player { display: flex; flex-direction: column; gap: 4px; font-size: clamp(18px, 2vw, 24px); min-width: 0; }
+.final-results-player > small { font-size: 15px; overflow-wrap: anywhere; }
+.final-results-player .result-watch-prefix { font-size: 18px; }
+.final-results-player .result-watch-number { font-size: clamp(26px, 3vw, 34px); }
+.result-breakdown summary { cursor: pointer; padding: 12px; font-size: 18px; font-weight: 700; }
+.result-breakdown-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.result-breakdown-cards .game-score-history-item { min-width: 0; max-width: 100%; }
+.result-breakdown-cards .result-set-scores { flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .final-results { padding: 12px; }
+  .final-results-columns, .final-results-row { grid-template-columns: 65px minmax(0, 1fr) 80px; gap: 8px; }
+  .final-results-row { padding: 12px 8px; }
+  .final-results-columns { padding: 0 8px 8px; font-size: 13px; }
+  .final-results-rank small { display: block; margin-left: 0; font-size: 14px; }
+}
+
+/* Color the entire heartbeat challenge card by its requested direction. */
+.challenge-player.challenge-phase-up {
+  background: #fff0dc;
+  border: 1px solid #f5ad55;
+  color: #c65d08;
+}
+.challenge-player.challenge-phase-down {
+  background: #e0f6ff;
+  border: 1px solid #72cde9;
+  color: #087fa3;
+}
+.challenge-phase-up .challenge-guidance { color: #c65d08; }
+.challenge-phase-down .challenge-guidance { color: #087fa3; }
+.challenge-phase-up .attack-status-badge {
+  background: #fff0dc;
+  border-color: #f5ad55;
+  color: #c65d08;
+}
+.challenge-phase-down .attack-status-badge {
+  background: #e0f6ff;
+  border-color: #72cde9;
+  color: #087fa3;
+}
+
+/* Success takes priority over the orange/blue direction styling. */
+.challenge-player.status-success {
+  background: #ecfdf3;
+  border: 3px solid #15803d;
+  color: #14532d;
+}
+.challenge-player.status-success .attack-status-badge,
+.attack-table .status-success .attack-status-badge {
+  background: #166534;
+  border-color: #166534;
+  color: #fff;
+  font-size: 1.05rem;
+}
+.challenge-player.status-success .challenge-guidance { color: #14532d; }
+.challenge-achieved-label {
+  margin-top: 18px;
+  padding: 16px 12px;
+  border-radius: 10px;
+  background: #166534;
+  color: #fff;
+  text-align: center;
+  font-size: clamp(23px, 2.5vw, 32px);
+  line-height: 1.35;
+  font-weight: 900;
+}
+.attack-table tr.status-success { background: #ecfdf3; }
+
+.state-quota-time { grid-column: 1 / -1; width: 100%; margin-top: 8px; padding: 8px 10px; box-sizing: border-box; border-radius: 8px; background: #eef2ff; color: #263b70; font-size: clamp(14px, 1.4vw, 19px); font-weight: 700; }
+.state-quota-time.is-leading { background: #dcfce7; color: #14532d; }

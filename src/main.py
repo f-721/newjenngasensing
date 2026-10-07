@@ -45,8 +45,13 @@ def disable_settings_cache(response):
         response.headers["Expires"] = "0"
     return response
 
+# Resolve the main server's state path, including paths replaced by isolated tests.
+app.extensions["is_game_running"] = lambda: load_json_file(GAME_STATUS_FILE).get("running", False)
+app.extensions["finalize_attack_turn"] = lambda: resolve_attack_challenge() if load_json_file(CONTROL_FILE).get("mode") in {"attack_challenge", "attack_challenge_wait"} else None
+
 clients = {}
 file_lock = threading.Lock()
+coop_status_lock = threading.Lock()
 watch_assignment_lock = registration_lock
 MAX_WATCHES = 4
 DATA_FILE = 'heart_rates.json'
@@ -102,6 +107,7 @@ COOP_DEFAULTS = {
     "assignment_mode": "specified",
     "pairing": "12_34",
     "quota_offset": 10,
+    "down_quota_offset": 3,
     "initial_rpm": 40,
     "supported_rpm": 10,
 }
@@ -144,26 +150,49 @@ def initialize_coop_game(watch_ids, total_sets):
     return state
 
 
+def choose_challenge_phase(previous_phase, previous_count=0):
+    """Randomize the direction, forcing a switch after three identical phases."""
+    try:
+        count = max(1, int(previous_count)) if previous_phase in {"up", "down"} else 0
+    except (TypeError, ValueError):
+        count = 1 if previous_phase in {"up", "down"} else 0
+    if previous_phase in {"up", "down"} and count >= 3:
+        phase = "down" if previous_phase == "up" else "up"
+    else:
+        phase = random.choice(["up", "down"])
+    return phase, count + 1 if phase == previous_phase else 1
+
+
 def update_coop_turn_state(state):
-    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    turn = load_json_file(TURN_FILE)
+    current_turn = turn.get("current_turn")
+    turn_number = turn.get("turn_number", 1)
     teams = state.get("teams", {})
     team_id = coop_team_for(current_turn, teams)
     members = teams.get(team_id, [])
     supporter = next((watch_id for watch_id in members if watch_id != current_turn), None)
+    previous_turn_state = dict(state.get("turn_state", {}))
     turn_state = state.get("turn_state", {})
-    if turn_state.get("current_turn") != current_turn:
+    if turn_state.get("current_turn") != current_turn or turn_state.get("turn_number") != turn_number:
+        # Draw once at the start of each turn; polling keeps this choice.
+        phase, phase_streak = choose_challenge_phase(turn_state.get("phase"), turn_state.get("phase_streak", 1))
         baseline = load_json_file(BASELINE_FILE).get(supporter)
         try:
-            threshold = float(baseline) + float(state["settings"].get("quota_offset", 10))
+            settings = state["settings"]
+            offset = abs(float(settings.get("quota_offset", 10))) if phase == "up" else abs(float(settings.get("down_quota_offset", 3)))
+            threshold = float(baseline) + (offset if phase == "up" else -offset)
         except (TypeError, ValueError):
             threshold = None
         turn_state = {
             "current_turn": current_turn, "team_id": team_id, "supporter": supporter,
             "threshold": threshold, "success": False, "success_timestamp": None,
+            "phase": phase, "phase_streak": phase_streak, "turn_number": turn_number,
         }
     heartbeat = get_latest_heartbeats().get(supporter)
     try:
-        reached = float(heartbeat) >= float(turn_state.get("threshold"))
+        value = float(heartbeat)
+        threshold = float(turn_state.get("threshold"))
+        reached = value <= threshold if turn_state.get("phase") == "down" else value >= threshold
     except (TypeError, ValueError):
         reached = False
     if reached and not turn_state.get("success"):
@@ -173,7 +202,8 @@ def update_coop_turn_state(state):
     turn_state["rpm"] = state["settings"].get("supported_rpm", 10) if turn_state.get("success") else state["settings"].get("initial_rpm", 40)
     turn_state["direction"] = "c" if turn_state.get("success") else "coop_random"
     state["turn_state"] = turn_state
-    save_coop_state(state)
+    if turn_state != previous_turn_state:
+        save_coop_state(state)
     return state
 
 
@@ -365,6 +395,7 @@ def record_attack_success_event(attacker, success):
         "direction": success.get("direction"),
         "target": success.get("target"),
         "turn": success.get("turn"),
+        "turn_number": success.get("turn_number"),
         "quota_keep_ms": success.get("quota_keep_ms", 0),
         "quota_error_total": success.get("quota_error_total", 0),
         "quota_sample_count": success.get("quota_sample_count", 0),
@@ -401,6 +432,12 @@ def finish_set(collapsed_player):
         series["current_set_events"],
         series["scoring_mode"],
     )
+    state_ranking = []
+    if series["scoring_mode"] == "state":
+        scores, state_ranking = apply_state_bonus(scores, series["current_set_events"], series["watch_ids"])
+        for entry in state_ranking:
+            if entry["rank"] == 1 and entry["quota_keep_ms"] > 0:
+                set_points[entry["watch_id"]]["ranking"] = 1
     survivors = [watch_id for watch_id in series["watch_ids"] if watch_id != collapsed_player]
     success_counts = {
         watch_id: sum(1 for event in series["current_set_events"] if event.get("attacker") == watch_id)
@@ -416,6 +453,8 @@ def finish_set(collapsed_player):
         "scores": scores,
         "attack_metrics": calculate_attack_metrics(series["current_set_events"], series["watch_ids"]),
         "impact_winner": determine_impact_winner(series["current_set_events"], series["watch_ids"]),
+        "state_ranking": state_ranking,
+        "state_bonus_winners": [item["watch_id"] for item in state_ranking if item["rank"] == 1 and item["quota_keep_ms"] > 0],
     }
     series["scores"] = scores
     series["set_history"].append(result)
@@ -423,15 +462,6 @@ def finish_set(collapsed_player):
     series["set_finished"] = True
 
     if series["game_number"] >= series["total_sets"]:
-        if series["scoring_mode"] == "state":
-            series["scores"], state_ranking = apply_state_bonus(
-                series["scores"], series["attack_events"], series["watch_ids"]
-            )
-            result["state_bonus_winner"] = (
-                state_ranking[0]["watch_id"]
-                if state_ranking and state_ranking[0]["quota_keep_ms"] > 0 else None
-            )
-            result["scores"] = series["scores"]
         series["final_ranking"] = calculate_final_ranking(series["scores"], series["watch_ids"])
         series["active"] = False
 
@@ -746,10 +776,14 @@ def get_allowed_attack_targets(attacker, assigned_watches=None):
 
 def get_attack_challenge_condition():
     """Return the stable per-turn challenge condition without resetting the full attack cycle on the first watch."""
-    current_turn = load_json_file(TURN_FILE).get("current_turn")
+    turn = load_json_file(TURN_FILE)
+    current_turn = turn.get("current_turn")
+    turn_number = turn.get("turn_number", 0)
     condition = load_json_file(ATTACK_CONDITION_FILE)
 
-    if condition.get("turn") == current_turn and condition.get("direction") in {"up", "down"}:
+    if (condition.get("turn") == current_turn
+            and condition.get("turn_number", turn_number) == turn_number
+            and condition.get("direction") in {"up", "down"}):
         return condition
 
     if isinstance(condition, dict) and condition.get("turn") and condition.get("turn") != current_turn:
@@ -759,11 +793,14 @@ def get_attack_challenge_condition():
     experienced_attackers = set(condition.get("experienced_attackers", []))
     experienced_attackers.update(condition.get("attackers_this_turn", []))
     is_first_turn = not condition.get("turn")
-    direction = random.choice(["up", "down"])
+    legacy_streak = 2 if condition.get("previous_direction") == previous_direction else 1
+    direction, phase_streak = choose_challenge_phase(previous_direction, condition.get("phase_streak", legacy_streak))
     condition = {
         "turn": current_turn,
         "direction": direction,
         "previous_direction": previous_direction,
+        "phase_streak": phase_streak,
+        "turn_number": turn_number,
         "first_turn": is_first_turn,
         "experienced_attackers": sorted(experienced_attackers),
         "attackers_this_turn": [],
@@ -822,6 +859,8 @@ def attack_reference(attacker, condition):
 
 def resolve_attack_challenge():
     """Promote pending attack signals once their sender meets this turn's condition."""
+    if not load_json_file(GAME_STATUS_FILE).get("running", False):
+        return load_json_file(ATTACK_CONDITION_FILE), load_attack_pending(), load_attack_targets(), []
     condition = get_attack_challenge_condition()
     pending = load_attack_pending()
     active_targets = load_attack_targets()
@@ -831,7 +870,7 @@ def resolve_attack_challenge():
     state_updated = False
     sample_timestamp = int(time.time() * 1000)
 
-    # 到達済みの挑戦者は、現在値がノルマの±3 BPMなら維持時間を加算する。
+    # 上昇はノルマ以上、下降はノルマ以下にいる時間を加算する。
     for attacker, state in success_state.items():
         if not isinstance(state, dict) or state.get("turn") != condition.get("turn"):
             continue
@@ -847,7 +886,8 @@ def resolve_attack_challenge():
         state["last_state_sample_timestamp"] = sample_timestamp
         state["quota_error_total"] = float(state.get("quota_error_total", 0) or 0) + error
         state["quota_sample_count"] = int(state.get("quota_sample_count", 0) or 0) + 1
-        if error <= 3:
+        on_goal_side = heartbeat <= threshold if state.get("direction") == "down" else heartbeat >= threshold
+        if on_goal_side:
             state["quota_keep_ms"] = int(state.get("quota_keep_ms", 0) or 0) + elapsed_ms
         update_attack_state_event(attacker, state)
         state_updated = True
@@ -874,6 +914,7 @@ def resolve_attack_challenge():
             del pending[attacker]
             success_state[attacker] = {
                 "turn": condition.get("turn"),
+                "turn_number": condition.get("turn_number"),
                 "target": signal.get("target"),
                 "direction": condition.get("direction"),
                 "heartbeat": heartbeat,
@@ -1025,10 +1066,14 @@ def get_jenga_series():
     # 開始後は、そのシリーズ開始時に確定した方式を維持する。
     if not series["active"]:
         series["scoring_mode"] = load_attack_scoring()["mode"]
+    turn = load_json_file(TURN_FILE)
+    running = load_json_file(GAME_STATUS_FILE).get("running", False)
+    completed_events = [event for event in series["current_set_events"]
+                        if not running or event.get("turn_number") != turn.get("turn_number")]
     return jsonify({
         **series,
         "interference_ranking": calculate_interference_ranking(series["attack_events"], series["watch_ids"]),
-        "state_ranking": calculate_state_ranking(series["attack_events"], series["watch_ids"]),
+        "state_ranking": calculate_state_ranking(completed_events, series["watch_ids"]),
         "current_set_attack_metrics": calculate_attack_metrics(
             series["current_set_events"], series["watch_ids"]
         ),
@@ -1083,11 +1128,13 @@ def select_coop_mode():
 
 @app.route('/coop_status')
 def coop_status():
-    state = load_coop_state()
-    enabled = load_json_file(CONTROL_FILE).get("mode") == "team_coop"
-    if enabled and state.get("active") and not state.get("set_finished"):
-        state = update_coop_turn_state(state)
-    return jsonify({**state, "enabled": enabled})
+    # Multiple screens and the motor can request the new turn simultaneously.
+    with coop_status_lock:
+        state = load_coop_state()
+        enabled = load_json_file(CONTROL_FILE).get("mode") == "team_coop"
+        if enabled and state.get("active") and not state.get("set_finished"):
+            state = update_coop_turn_state(state)
+        return jsonify({**state, "enabled": enabled})
 
 
 @app.route('/jenga_settings', methods=['POST'])
@@ -1182,6 +1229,27 @@ def next_jenga_game():
 def stop_game():
     # ゲーム状態を読み込む
     game_status = load_json_file(GAME_STATUS_FILE)
+
+    if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
+        coop = load_coop_state()
+        finished = bool(coop.get("active") and not coop.get("set_finished"))
+        if finished:
+            coop.setdefault("set_history", []).append({
+                "set": coop.get("game_number", 1), "collapsed_player": None,
+                "team_scores": dict(coop.get("team_scores", {})),
+            })
+            coop["set_finished"] = True
+            if coop.get("game_number", 1) >= coop.get("total_sets", 1):
+                coop["active"] = False
+                scores = coop.get("team_scores", {"team_a": 0, "team_b": 0})
+                winners = [team for team, score in scores.items() if score == max(scores.values())]
+                coop["winner"] = winners[0] if len(winners) == 1 else "draw"
+            save_coop_state(coop)
+        game_status.update({"running": False, "game_over": not coop.get("active", False)})
+        save_json_file(GAME_STATUS_FILE, game_status, log=False)
+        return jsonify({"status": "ok", "set_finished": finished,
+                        "series_complete": not coop.get("active", False),
+                        "scores": coop.get("team_scores", {})})
 
     series = load_jenga_series()
     finished_series = None
@@ -1306,7 +1374,7 @@ def set_turn():
     turn_number = turn_state.get("turn_number", 0)
     if turn_state.get("current_turn") != new_turn:
         current_turn = turn_state.get("current_turn")
-        if load_json_file(CONTROL_FILE).get("mode") == "attack_challenge":
+        if load_json_file(CONTROL_FILE).get("mode") in {"attack_challenge", "attack_challenge_wait"}:
             # Capture a challenge completed immediately before the turn button was pressed.
             resolve_attack_challenge()
         award_turn_scores(current_turn)
@@ -1337,17 +1405,33 @@ def record_collapse():
         return jsonify({"status": "error", "message": "ゲームを開始してください"}), 400
 
     current_turn = load_json_file(TURN_FILE).get("current_turn")
-    if not current_turn:
-        return jsonify({"status": "error", "message": "現在の手番が設定されていません"}), 400
-
     data = request.get_json(silent=True) or {}
-    if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
-        coop = load_coop_state()
-        collapsed_team = coop_team_for(current_turn, coop.get("teams", {}))
+    if not isinstance(data, dict):
+        return jsonify({"status": "error", "message": "記録内容の形式が不正です"}), 400
+    collapsed_watch = data.get("watch_id")
+    if collapsed_watch is None or collapsed_watch == "":
+        collapsed_watch = current_turn
+    if not collapsed_watch:
+        return jsonify({"status": "error", "message": "倒壊させたwatchを指定してください"}), 400
+
+    mode = load_json_file(CONTROL_FILE).get("mode")
+    series = load_jenga_series()
+    coop = load_coop_state() if mode == "team_coop" else {}
+    if mode == "team_coop":
+        participants = [watch for members in coop.get("teams", {}).values() for watch in members]
+    elif series["active"]:
+        participants = series["watch_ids"]
+    else:
+        participants = list(load_json_file(ASSIGNED_FILE).values())
+    if not isinstance(collapsed_watch, str) or collapsed_watch not in participants:
+        return jsonify({"status": "error", "message": "ゲームに参加しているwatchを指定してください"}), 400
+
+    if mode == "team_coop":
+        collapsed_team = coop_team_for(collapsed_watch, coop.get("teams", {}))
         scoring_team = "team_b" if collapsed_team == "team_a" else "team_a"
         coop.setdefault("team_scores", {"team_a": 0, "team_b": 0})[scoring_team] += 1
         coop.setdefault("set_history", []).append({
-            "set": coop.get("game_number", 1), "collapsed_player": current_turn,
+            "set": coop.get("game_number", 1), "collapsed_player": collapsed_watch,
             "collapsed_team": collapsed_team, "scoring_team": scoring_team,
             "team_scores": dict(coop["team_scores"]),
         })
@@ -1361,13 +1445,13 @@ def record_collapse():
         game_status.update({"running": False, "game_over": not coop.get("active")})
         save_json_file(GAME_STATUS_FILE, game_status, log=False)
         return jsonify({
-            "status": "ok", "watch_id": current_turn, "set_finished": True,
+            "status": "ok", "watch_id": collapsed_watch, "set_finished": True,
             "series_complete": not coop.get("active"), "coop": coop,
         })
     series = load_jenga_series()
     if series["active"]:
         resolve_attack_challenge()
-        series = finish_set(current_turn)
+        series = finish_set(collapsed_watch)
         game_status["running"] = False
         game_status["game_over"] = not series["active"]
         save_json_file(GAME_STATUS_FILE, game_status, log=False)
@@ -1375,11 +1459,11 @@ def record_collapse():
         history = load_csv_history()
         history.append({
             "timestamp": int(time.time() * 1000),
-            "device_id": current_turn,
+            "device_id": collapsed_watch,
             "game_phase": "set_end",
             "current_turn": current_turn,
             "collapse": data.get("notes") or data.get("message") or "倒壊",
-            "score": series["scores"][current_turn]["total_score"],
+            "score": series["scores"][collapsed_watch]["total_score"],
             "score_change": 0,
             "score_reason": f"SET {result['set']} 終了",
             **jenga_csv_fields(),
@@ -1387,7 +1471,7 @@ def record_collapse():
         save_json_file(CSV_HISTORY_FILE, history, log=False)
         return jsonify({
             "status": "ok",
-            "watch_id": current_turn,
+            "watch_id": collapsed_watch,
             "set_finished": True,
             "series_complete": not series["active"],
             "scores": series["scores"],
@@ -1395,24 +1479,26 @@ def record_collapse():
             "final_ranking": series["final_ranking"],
         })
 
-    scores = apply_points(load_scores(), [current_turn], -3)
+    scores = apply_points(load_scores(), [collapsed_watch], -3)
     save_json_file(SCORES_FILE, scores, log=False)
 
     # Exported data keeps a lightweight collapse marker as well.
     history = load_csv_history()
     history.append({
         "timestamp": int(time.time() * 1000),
-        "device_id": current_turn,
+        "device_id": collapsed_watch,
         "game_phase": "playing",
         "current_turn": current_turn,
         "collapse": data.get("notes") or data.get("message") or "倒壊",
-        "score": scores[current_turn],
+        "score": scores[collapsed_watch],
         "score_change": -3,
         "score_reason": "倒壊",
         **jenga_csv_fields(),
     })
     save_json_file(CSV_HISTORY_FILE, history, log=False)
-    return jsonify({"status": "ok", "watch_id": current_turn, "score": scores[current_turn]})
+    game_status.update({"running": False, "game_over": True})
+    save_json_file(GAME_STATUS_FILE, game_status, log=False)
+    return jsonify({"status": "ok", "watch_id": collapsed_watch, "score": scores[collapsed_watch]})
 
 @app.route('/reconnect', methods=['POST'])
 def reconnect():
@@ -1730,6 +1816,8 @@ def get_attack_targets():
 
 @app.route('/set_attack_target', methods=['POST'])
 def set_attack_target():
+    if not load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム終了中は妨害できません"}), 409
     data = request.get_json(silent=True) or {}
     attacker = data.get("attacker")
     target = data.get("target")
@@ -1745,6 +1833,8 @@ def set_attack_target():
 @app.route('/attack_signal', methods=['POST'])
 def receive_attack_signal():
     """Pixel Watchからの妨害信号を受け取り、現在の妨害対象へ反映する。"""
+    if not load_json_file(GAME_STATUS_FILE).get("running", False):
+        return jsonify({"status": "error", "message": "ゲーム終了中は妨害できません"}), 409
     if load_json_file(CONTROL_FILE).get("mode") == "team_coop":
         return jsonify({"status": "ignored", "message": "2対2協力モードでは妨害ボタンは使用できません"})
     data = request.get_json(silent=True) or {}

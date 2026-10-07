@@ -12,6 +12,7 @@ from score_logic import (
 
 turn_api = Blueprint('turn_api', __name__)
 
+GAME_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'game_status.json')
 TURN_FILE = 'turn.json'
 ASSIGNED_FILE = 'assigned_ids.json'
 ROTATION_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rotation_status.json')
@@ -95,12 +96,19 @@ def get_turn():
 
 @turn_api.route('/next_turn', methods=['POST'])
 def next_turn():
+    is_running = current_app.extensions.get("is_game_running")
+    running = is_running() if is_running else load_json_file(GAME_STATUS_FILE).get("running", False)
+    if not running:
+        return jsonify({"status": "error", "message": "ゲーム終了中はターンを進められません"}), 409
     assigned_ids = load_json_file(ASSIGNED_FILE)
     all_ids = sorted(set(assigned_ids.values()))
 
     if not all_ids:
         return jsonify({"status": "error", "message": "割り当てIDがありません"}), 500
 
+    finalize_attack = current_app.extensions.get("finalize_attack_turn")
+    if finalize_attack:
+        finalize_attack()
     current = load_current_turn()
     if current not in all_ids:
         next_index = 0

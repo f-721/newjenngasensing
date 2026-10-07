@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>設定（ゲーム設定 と モーター制御）</title>
-  <link rel="stylesheet" href="/static/styles.css?v=watch-number-5">
+  <link rel="stylesheet" href="/static/styles.css?v=state-time-20">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -70,6 +70,11 @@
 
         <div class="control-section">
           <h3>ジェンガ倒壊</h3>
+          <label for="collapseWatchSelector">倒壊させたwatch</label>
+          <select id="collapseWatchSelector">
+            <option value="">現在の手番（自動）</option>
+          </select>
+          <p class="collapse-help">通常は現在の手番を使います。手番交代後に倒れた場合は、倒壊させたwatchを選んでください。</p>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <input type="text" id="collapseNotes" placeholder="メモ（任意）" style="padding: 8px; border-radius: 8px; border: 1px solid #ccc;">
             <button onclick="recordCollapse()" style="background-color: #d32f2f;">倒壊を記録</button>
@@ -147,9 +152,9 @@
             <div id="attackScoringControls">
               <label class="mode-note" for="attackScoringSelector">妨害チャレンジ得点方式</label>
               <select id="attackScoringSelector" class="attack-scoring-select" onchange="setAttackScoring()">
-                <option value="success">成功回数: 成功 +1点</option>
+                <option value="success">成功回数: 成功1回ごとに +1点</option>
                 <option value="impact">影響度: セット首位 +1点</option>
-                <option value="state">状態管理: ノルマ維持時間1位に終了時 +1点</option>
+                <option value="state">状態管理: セット内のノルマ達成時間1位に +1点</option>
                 <option value="mvp">MVP: セットMVP +1点</option>
               </select>
             </div>
@@ -162,7 +167,7 @@
               <ul>
                 <li><strong>成功回数</strong>: 妨害に成功した回数ごとに +1 点</li>
                 <li><strong>影響度</strong>: そのセットで最も影響が大きかった人に +1 点</li>
-                <li><strong>状態管理</strong>: ノルマ到達後、ノルマの ±3 BPM を最も長く維持した人にゲーム終了時 +1 点</li>
+                <li><strong>状態管理</strong>: 上昇はノルマ以上、下降はノルマ以下にいた累計時間がセット内で最長の人に +1 点（同率は同順位）。表示はターン交代時に更新</li>
                 <li><strong>MVP</strong>: セット内で最も妨害に貢献した人に +1 点</li>
               </ul>
             </div>
@@ -246,7 +251,7 @@
   </div>
 
   <a href="/" class="mini-link-btn">ダッシュボードに戻る</a>
-  <script src="/static/app.js?v=watch-number-5"></script>
-  <script src="/static/coop.js?v=1"></script>
+  <script src="/static/app.js?v=state-time-18"></script>
+  <script src="/static/coop.js?v=lightweight-2"></script>
 </body>
 </html>

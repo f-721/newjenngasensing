@@ -1,13 +1,17 @@
 {
-  "turn": "watch3",
-  "direction": "up",
-  "previous_direction": null,
-  "first_turn": true,
-  "experienced_attackers": [],
+  "turn": "watch2",
+  "direction": "down",
+  "previous_direction": "down",
+  "phase_streak": 2,
+  "turn_number": 6,
+  "first_turn": false,
+  "experienced_attackers": [
+    "watch1",
+    "watch2"
+  ],
   "attackers_this_turn": [],
   "turn_start_heartbeats": {
-    "watch3": 68.0,
-    "watch2": 68.0,
-    "watch1": 66.0
+    "watch2": 77.0,
+    "watch1": 78.0
   }
 }

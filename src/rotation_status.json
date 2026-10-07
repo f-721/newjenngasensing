@@ -1,59 +1,40 @@
 {
   "watch1": {
-    "target_watch": "watch3",
-    "mode": "highest_diff",
-    "rpm": 20.0,
-    "direction": "c",
-    "extreme": "up",
-    "attackers": [],
-    "attack_count": 0,
-    "reference_bpm": 64.3,
-    "reference_source": "baseline",
-    "baseline_bpm": 64.3,
+    "target_watch": "watch2",
+    "mode": "attack_challenge",
+    "rpm": 30.0,
+    "direction": "a",
+    "extreme": null,
+    "attackers": [
+      "watch2"
+    ],
+    "attack_count": 1,
+    "reference_bpm": 88.0,
+    "reference_source": "turn_start",
+    "baseline_bpm": 78.44444444444444,
     "reference_heartbeats": {
-      "watch2": 65.66666666666667,
-      "watch3": 64.3
+      "watch2": 88.0
     },
-    "attack_mode": false,
-    "challenge_direction": null,
+    "attack_mode": true,
+    "challenge_direction": "down",
     "pending_attackers": []
   },
   "watch2": {
-    "target_watch": "watch3",
-    "mode": "highest_diff",
-    "rpm": 10.0,
-    "direction": "c",
-    "extreme": "up",
-    "attackers": [],
-    "attack_count": 0,
-    "reference_bpm": 72.0,
-    "reference_source": "turn_start",
-    "baseline_bpm": 64.3,
-    "reference_heartbeats": {
-      "watch1": 70.0,
-      "watch3": 72.0
-    },
-    "attack_mode": false,
-    "challenge_direction": null,
-    "pending_attackers": []
-  },
-  "watch3": {
-    "target_watch": "watch2",
-    "mode": "highest_diff",
+    "target_watch": "watch1",
+    "mode": "attack_challenge",
     "rpm": 20.0,
-    "direction": "c",
-    "extreme": "up",
+    "direction": "a",
+    "extreme": null,
     "attackers": [],
     "attack_count": 0,
-    "reference_bpm": 74.0,
+    "reference_bpm": 78.0,
     "reference_source": "turn_start",
-    "baseline_bpm": 65.66666666666667,
+    "baseline_bpm": 77.85714285714286,
     "reference_heartbeats": {
-      "watch1": 73.0,
-      "watch2": 74.0
+      "watch1": 78.0
     },
-    "attack_mode": false,
-    "challenge_direction": null,
+    "attack_mode": true,
+    "challenge_direction": "down",
     "pending_attackers": []
   }
 }
